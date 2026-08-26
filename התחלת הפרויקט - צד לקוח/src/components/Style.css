@@ -1,0 +1,320 @@
+/* --- הגדרות כלליות --- */
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: #dadbd3; /* אפור-וואטסאפ */
+    margin: 0;
+    direction: rtl;
+}
+
+/* --- תפריט ניווט עליון --- */
+#bar {
+    background-color: #075e54; /* ירוק וואטסאפ כהה */
+    padding: 15px;
+    display: flex;
+    justify-content: center;
+    gap: 20px;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+}
+
+#bar a {
+    color: white;
+    text-decoration: none;
+    font-weight: bold;
+    transition: color 0.3s;
+}
+
+#bar a:hover {
+    color: #25d366; /* ירוק בהיר במעבר עכבר */
+}
+
+/* --- המיכל הראשי של הצ'אט --- */
+.chat-container {
+    display: flex;
+    height: 85vh; 
+    width: 95vw;
+    max-width: 1400px;
+    margin: 20px auto;
+    background: #fff;
+    border-radius: 10px; /* פינות מעט פחות מעוגלות למראה מקצועי */
+    box-shadow: 0 15px 35px rgba(0,0,0,0.2);
+    overflow: hidden;
+}
+
+/* --- סרגל צד (היסטוריה והעלאת קבצים) --- */
+.sidebar {
+    width: 280px;
+    background-color: #f0f2f5;
+    border-left: 1px solid #ddd;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.sidebar-btn, .file-upload-btn {
+    background-color: #ffffff;
+    border: 1px solid #00a884;
+    color: #00a884;
+    padding: 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    text-align: center;
+    font-weight: bold;
+    transition: 0.3s;
+}
+
+.sidebar-btn:hover, .file-upload-btn:hover {
+    background-color: #00a884;
+    color: white;
+}
+
+/* --- החלק המרכזי של הצ'אט --- */
+.chat-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background-color: #ffffff;
+    height: 100%;
+}
+
+/* פס כותרת פנימי (חדש!) */
+.chat-header {
+    background-color: #ededed;
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    border-bottom: 1px solid #ddd;
+    font-weight: bold;
+    color: #333;
+    font-size: 18px;
+}
+
+/* רשימת ההודעות עם רקע דודלים */
+.messages-list {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 20px 10%; /* שוליים רחבים יותר כמו בוואטסאפ ווב */
+    background-color: #e5ddd5;
+    background-image: url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png');
+    background-repeat: repeat;
+    overflow-y: auto;
+}
+
+/* --- עיצוב בועות ההודעה --- */
+.message {
+    max-width: 65%;
+    padding: 10px 15px;
+    margin-bottom: 12px;
+    border-radius: 12px;
+    font-size: 16px;
+    line-height: 1.5;
+    position: relative;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.15);
+}
+
+.message.user {
+    align-self: flex-end;
+    background-color: #dcf8c6; /* ירוק בהיר */
+    border-top-right-radius: 0;
+}
+
+.message.bot {
+    align-self: flex-start;
+    background-color: #ffffff; /* לבן */
+    border-top-left-radius: 0;
+}
+
+/* --- אזור הקלט למטה --- */
+.input-area {
+    padding: 15px 25px;
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    background-color: #f0f0f0;
+    border-top: 1px solid #ddd;
+}
+
+.chat-input {
+    flex: 1;
+    padding: 12px 20px;
+    border: none;
+    border-radius: 25px;
+    outline: none;
+    font-size: 16px;
+    text-align: right;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.send-btn {
+    background-color: #00a884; /* ירוק כפתור וואטסאפ */
+    color: white;
+    border: none;
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    transition: 0.2s;
+}
+
+.send-btn:hover {
+    background-color: #008f6f;
+    transform: scale(1.05);
+}
+
+/* כפתור חזור משודרג, בולט ונוח ללחיצה */
+.back-btn {
+    position: fixed;
+    bottom: 35px; /* הורחק מהתחתית הקיצונית */
+    left: 35px;   /* הורחק מהצד הקיצוני */
+    background-color: #075e54; /* ירוק וואטסאפ כהה במקום השחור המקורי */
+    color: white;
+    border-radius: 50%;
+    width: 55px;
+    height: 55px;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.25);
+    font-size: 22px;
+    font-weight: bold;
+    transition: all 0.2s ease;
+    z-index: 9999; /* מבטיח שהוא תמיד יהיה מעל הכל */
+}
+
+.back-btn:hover {
+    background-color: #00a884; /* משנה צבע בריחופ עכבר */
+    transform: scale(1.1); /* גדל מעט בהצבעה */
+}
+
+.wizard-nav {
+  display: flex;
+  justify-content: space-between;
+  padding: 20px 40px;
+  background: white;
+  border-top: 1px solid #eee;
+  position: fixed;
+  bottom: 0;
+  width: 100%;
+}
+
+.wizard-btn {
+  padding: 10px 25px;
+  background: #00a884;
+  color: white;
+  border: none;
+  border-radius: 20px;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+/* --- עיצוב דפי כניסה, הרשמה וטפסים כלליים --- */
+.auth-wrapper {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 80vh;
+    padding: 20px;
+}
+
+.auth-card {
+    background: #ffffff;
+    padding: 40px;
+    border-radius: 12px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+    width: 100%;
+    max-width: 400px;
+    text-align: center;
+    box-sizing: border-box;
+}
+
+.auth-card h1 {
+    color: #075e54; /* ירוק כהה */
+    font-size: 26px;
+    margin-bottom: 25px;
+    font-weight: 600;
+}
+
+.auth-form {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+/* שדות קלט בסגנון נקי ומודרני */
+.auth-input {
+    width: 100%;
+    padding: 12px 16px;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    font-size: 16px;
+    box-sizing: border-box;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    text-align: right;
+}
+
+.auth-input:focus {
+    border-color: #00a884;
+    box-shadow: 0 0 0 3px rgba(0, 168, 132, 0.15);
+}
+
+/* לחצנים ראשיים */
+.btn-primary {
+    background-color: #00a884;
+    color: white;
+    border: none;
+    padding: 13px;
+    font-size: 16px;
+    font-weight: bold;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background-color 0.2s, transform 0.1s;
+    width: 100%;
+}
+
+.btn-primary:hover {
+    background-color: #008f6f;
+}
+
+.btn-primary:active {
+    transform: scale(0.98);
+}
+
+/* לחצנים משניים (למשל במסך הבית לבחירה בין הרשמה להתחברות) */
+.btn-secondary {
+    background-color: transparent;
+    color: #075e54;
+    border: 2px solid #075e54;
+    padding: 12px;
+    font-size: 16px;
+    font-weight: bold;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+    width: 100%;
+}
+
+.btn-secondary:hover {
+    background-color: rgba(7, 94, 84, 0.05);
+}
+
+/* עיצוב כללי לתוכן עמודים פשוטים כמו D, E, F */
+.generic-page {
+    background: white;
+    max-width: 800px;
+    margin: 40px auto;
+    padding: 30px;
+    border-radius: 10px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    text-align: center;
+}
+.generic-page h1 {
+    color: #075e54;
+}
