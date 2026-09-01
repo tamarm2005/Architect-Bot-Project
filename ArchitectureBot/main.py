@@ -1,7 +1,10 @@
 import os
+import json
 from google import genai
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from typing import List, Optional
 
 api_key = "AIzaSyCReUJYylhCf4tIQ7IREmOt-nPmDgW-aCY"
 client = genai.Client(api_key=api_key)
@@ -13,15 +16,17 @@ print("הקובץ עלה בהצלחה!")
 
 app = FastAPI()
 
-from fastapi.middleware.cors import CORSMiddleware
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"], 
+    allow_origins=["http://localhost:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ============================================
+# 1️⃣ כפתור "ייעוץ תקנות" - נשאר בדיוק כמו שהיה
+# ============================================
 
 class UserMessage(BaseModel):
     text: str
@@ -30,97 +35,101 @@ class UserMessage(BaseModel):
 async def chat_with_bot(message: UserMessage):
     try:
         print(f"קיבלתי שאלה: {message.text}")
-        
+
         response = client.models.generate_content(
-            model="models/gemini-2.5-flash", 
+            model="models/gemini-2.5-flash",
             config={
                 "system_instruction": "אתה עוזר אדריכלי מומחה. ענה תמיד בעברית בלבד. הסתמך על הקובץ המצורף כדי לענות על שאלות המשתמש בצורה מקצועית וברורה."
             },
             contents=[sample_file, message.text]
         )
-        
+
         if not response.text:
             return {"reply": "הבוט לא הצליח לייצר תשובה, נסה שנית."}
-            
-        print(f"הבוט ענה בהצלחה!") 
+
+        print("הבוט ענה בהצלחה!")
         return {"reply": response.text}
-        
+
     except Exception as e:
         print(f"שגיאה מפורטת: {str(e)}")
         return {"reply": f"שגיאה פנימית: {str(e)}"}
-    
-import io
-import ezdxf
-from fastapi import UploadFile, File
-from fastapi.responses import StreamingResponse
-
-@app.post("/process-dxf")
-async def process_dxf(file: UploadFile = File(...)):
-    try:
-        content = await file.read()
-        doc = ezdxf.readbytes(content)
-        msp = doc.modelspace()
-
-        for line in msp.query('LINE'):
-            start = line.dxf.start
-            end = line.dxf.end
-            msp.add_linear_dim(base=(start.x, start.y + 15), p1=start, p2=end).render()
-
-        out_buffer = io.BytesIO()
-        doc.write(out_buffer)
-        out_buffer.seek(0)
-
-        return StreamingResponse(
-            out_buffer,
-            media_type="application/dxf",
-            headers={"Content-Disposition": f"attachment; filename=new_plan.dxf"}
-        )
-    except Exception as e:
-        return {"error": str(e)}
 
 # ============================================
-# 🌟 Endpoint חדש: חילוץ רשימת חללים מטקסט חופשי
-# לא נוגע בקובץ החוקים/בכפתור הייעוץ הקיים
+# 2️⃣ צ'אט תכנון פרוגרמה - שיחה אנושית + סכמה מובנית בכל תור
 # ============================================
 
-class RoomExtractionRequest(BaseModel):
-    text: str
+class ChatTurn(BaseModel):
+    role: str          # "user" או "assistant"
+    content: str
 
-@app.post("/parse-rooms")
-async def parse_rooms(request: RoomExtractionRequest):
+class ProgramChatRequest(BaseModel):
+    history: List[ChatTurn]   # כל השיחה עד כה, כולל ההודעה האחרונה של המשתמש
+
+PROGRAM_SYSTEM_INSTRUCTION = """אתה עוזר תכנון אדריכלי חם, סבלני ואנושי, שעוזר למשתמשים (שלרוב לא מבינים באדריכלות) לבנות פרוגרמה - רשימת חדרים לדירה שלהם - דרך שיחה טבעית וידידותית.
+
+איך אתה מתנהג:
+- שואל שאלה אחת ממוקדת בכל פעם, לא מציף בשאלות.
+- אם המשתמש לא מבין מושג (למשל "מה זה מ\"ר") - מסביר בפשטות עם דוגמה, ואז ממשיך.
+- אם המשתמש נותן גודל לחדר (למשל "חדר ילדים בגודל 10") - אתה חייב לזהות את זה מיד ולהוסיף/לעדכן אותו ברשימת rooms, לא "להתפלסף" או לענות תשובה כללית שלא קשורה.
+- כשהמשתמש עמום ("תכנן לי דירה") - מציע הצעה סבירה של 3 חדרים ומסביר שאפשר לשנות.
+- כשנראה שהשיחה הגיעה למקום טוב עם רשימת חדרים סבירה - שואל אם הם רוצים להמשיך או שהפרוגרמה מוכנה.
+
+אתה חייב להחזיר תמיד אך ורק JSON תקין בפורמט הבא, בלי שום טקסט מסביב:
+{
+  "reply": "התגובה האנושית שלך למשתמש, בעברית, בסגנון חם ושיחתי",
+  "rooms": [{"name": "סלון", "area": 20}, {"name": "מטבח", "area": 10}],
+  "is_finished": false
+}
+
+כללים לגבי rooms:
+- rooms הוא תמיד המצב המצטבר המלא והעדכני של כל החדרים שדובר עליהם עד כה בשיחה - לא רק החדר האחרון.
+- אם משתמש לא ציין שטח לחלל - השלם שטח סביר לפי נורמות מגורים בישראל (סלון 14-30, מטבח 8-16, חדר שינה הורים 12-20, חדר ילדים 8-14, אמבטיה 3-8, שירותים 1.5-3.5, מרפסת 3-12).
+- אם המשתמש מבקש חלל לא נפוץ (חדר כושר, מרתף יין וכו') - עדיין תחזיר אותו עם שם ושטח הגיוניים.
+- is_finished יהיה true רק כשהמשתמש אישר בפירוש שהפרוגרמה מוכנה/סופית.
+
+דוגמה לסגנון שיחה רצוי:
+משתמש: "היי, אני רוצה לתכנן דירה חדשה. אנחנו זוג עם 3 ילדים."
+אתה: {"reply": "שלום! בשמחה רבה. כדי שנוכל לבנות פרוגרמה מדויקת, כמה חדרי שינה סך הכל תרצו בדירה?", "rooms": [], "is_finished": false}
+"""
+
+@app.post("/chat-program")
+async def chat_program(request: ProgramChatRequest):
     try:
-        print(f"מנתח בקשת חללים: {request.text}")
+        contents = []
+        for turn in request.history:
+            role = "user" if turn.role == "user" else "model"
+            contents.append({"role": role, "parts": [{"text": turn.content}]})
+
+        print(f"מנהל שיחת פרוגרמה, {len(contents)} תורות עד כה")
 
         response = client.models.generate_content(
             model="models/gemini-2.5-flash",
             config={
-                "system_instruction": """אתה עוזר תכנון אדריכלי. המשתמש יתאר בשפה חופשית (עברית) אילו חללים הוא רוצה בדירה.
-תפקידך: לזהות רשימת חללים ולהחזיר אך ורק JSON תקין בפורמט הבא, בלי שום טקסט נוסף מסביב, בלי ```json ובלי הסברים:
-{"rooms": [{"name": "סלון", "area": 20}, {"name": "מטבח", "area": 10}]}
-
-כללים:
-- אם המשתמש לא ציין שטח לחלל מסוים - השלימי שטח סביר בעצמך לפי נורמות מגורים בישראל (סלון 14-30, מטבח 8-14, חדר שינה הורים 12-16, חדר ילדים 8-12, אמבטיה 4-7, שירותים 1.5-3, מרפסת 4-10).
-- אם המשתמש מבקש חלל לא נפוץ (למשל 'חדר כושר' או 'מרתף יין') - עדיין החזירי אותו עם שם ושטח הגיוניים, אל תסרבי ואל תמציאי תשובה מחוץ ל-JSON.
-- אם הבקשה עמומה לגמרי (למשל 'תכנן לי דירה') - החזירי הצעה סבירה לדירת 3 חדרים סטנדרטית.
-- תמיד תחזירי rooms כמערך, גם אם יש חלל אחד בלבד.""",
+                "system_instruction": PROGRAM_SYSTEM_INSTRUCTION,
                 "response_mime_type": "application/json"
             },
-            contents=[request.text]
+            contents=contents
         )
 
         if not response.text:
             return {"success": False, "error": "המודל לא החזיר תשובה"}
 
-        import json
         parsed = json.loads(response.text)
-        print(f"חולצו {len(parsed.get('rooms', []))} חללים בהצלחה")
-        return {"success": True, "rooms": parsed.get("rooms", [])}
+        print(f"תגובה: {parsed.get('reply', '')[:50]}... | {len(parsed.get('rooms', []))} חדרים")
+
+        return {
+            "success": True,
+            "reply": parsed.get("reply", ""),
+            "rooms": parsed.get("rooms", []),
+            "is_finished": parsed.get("is_finished", False)
+        }
 
     except Exception as e:
-        print(f"שגיאה בחילוץ חללים: {str(e)}")
-        return {"success": False, "error": str(e)}
+        print(f"שגיאה בשיחת פרוגרמה: {str(e)}")
+        return {"success": False, "error": str(e), "reply": "מצטער, קרתה שגיאה. אפשר לנסות שוב?"}
 
 if __name__ == "__main__":
     import uvicorn
     print("השרת עולה בפורט 5000...")
     uvicorn.run(app, host="127.0.0.1", port=5000)
+

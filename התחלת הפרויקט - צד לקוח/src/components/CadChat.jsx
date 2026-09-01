@@ -235,36 +235,30 @@ const CadChat = ({ currentUser, onHistoryModeChange }) => {
             const response = await fetch('http://localhost:5245/api/chat/add-message', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ chatSessionId: activeSessionId, sender: "user", text: textToSend }),
-            });
+                body: JSON.stringify({ chatSessionId: activeSessionId, sender: "user", text: textToSend, userId: userId }),            });
 
             if (!response.ok) throw new Error(`שרת Backend החזיר שגיאה: ${response.status}`);
 
             const result = await response.json();
-            const botText = result.text || result.Text || result.response || "";
+            const botText = result.text || result.Text || "הבוט ענה ללא תוכן.";
 
-            // 3. חילוץ ה-JSON (אחיד ומסודר)
-            const jsonStartIdx = botText.indexOf('{');
-            const jsonEndIdx = botText.lastIndexOf('}');
-            let cleanText = botText;
-
-            if (jsonStartIdx !== -1 && jsonEndIdx !== -1 && jsonEndIdx > jsonStartIdx) {
-                try {
-                    const jsonString = botText.substring(jsonStartIdx, jsonEndIdx + 1);
-                    const parsed = JSON.parse(jsonString);
-
-                    // עדכון דיאגרמה
-                    if (parsed.rooms) {
-                        setProgramData(prev => ({ ...prev, rooms: parsed.rooms, lines: parsed.lines || [] }));
-                        if (onHistoryModeChange) onHistoryModeChange(false); // נוצר שרטוט חדש - יוצאים ממצב תצוגת-היסטוריה
-                    }
-                    // ניקוי הטקסט למשתמש
-                    cleanText = botText.substring(0, jsonStartIdx).trim() + " " + botText.substring(jsonEndIdx + 1).trim();
-                    cleanText = cleanText.replace(/```json\s*$/, '').replace(/```\s*$/, '').trim();
-                } catch (e) { console.log("שיחה טקסטואלית רגילה"); }
+            // 🌟 אם השרת יצר סשן חדש בעצמו, מסנכרנים את זה בצד React
+            if (result.chatSessionId && !currentSessionId) {
+                setCurrentSessionId(result.chatSessionId);
             }
 
-            setChatHistory(prev => [...prev, { sender: 'bot', text: cleanText || "הבוט ענה ללא תוכן." }]);
+            // 🌟 החדרים מגיעים ישירות ומובנים מהשרת - מעדכנים את סכמת הבועות בפועל
+            if (result.rooms && result.rooms.length > 0) {
+                const roomsWithIds = result.rooms.map((r, idx) => ({
+                    id: idx + 1,
+                    name: r.name || r.Name,
+                    area: r.area || r.Area
+                }));
+                setProgramData(prev => ({ ...prev, rooms: roomsWithIds }));
+                if (onHistoryModeChange) onHistoryModeChange(false);
+            }
+
+            setChatHistory(prev => [...prev, { sender: 'bot', text: botText }]);
 
         } catch (error) {
             console.error("Error:", error);

@@ -3,12 +3,12 @@ using Models;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
-using System.Text.Json.Nodes;
 
 namespace CadProject.Controllers
 {
@@ -19,7 +19,6 @@ namespace CadProject.Controllers
         private readonly ProjectContext _context;
         public ChatController(ProjectContext context) { _context = context; }
 
-        // יוצר סישן חדש
         [HttpPost("new-session")]
         public async Task<IActionResult> CreateSession([FromQuery] int userId, [FromQuery] string title)
         {
@@ -34,10 +33,9 @@ namespace CadProject.Controllers
         {
             var session = await _context.ChatSessions.FindAsync(sessionId);
             if (session == null) return NotFound();
-
             _context.ChatSessions.Remove(session);
             await _context.SaveChangesAsync();
-            return NoContent(); // מוחק ומחזיר אישור שהסתיים בהצלחה
+            return NoContent();
         }
 
         [HttpGet("user-sessions/{userId}")]
@@ -54,63 +52,111 @@ namespace CadProject.Controllers
             return Ok(messages);
         }
 
+        // 🌟 ChatSessionId עכשיו nullable (int?) - כדי שבקשה בלי סשן לא תיפסל אוטומטית עם 400
+        public class AddMessageDto
+        {
+            public int? ChatSessionId { get; set; }
+            public string Sender { get; set; } = "";
+            public string Text { get; set; } = "";
+            public int? UserId { get; set; } // 🌟 גיבוי - אם אין סשן, ניצור אחד חדש בעצמנו כאן
+        }
+
         [HttpPost("add-message")]
-        public async Task<IActionResult> AddMessage([FromBody] ChatMessage request)
+        public async Task<IActionResult> AddMessage([FromBody] AddMessageDto request)
         {
             try
             {
+                // 🌟 אם לא הגיע מזהה סשן תקין - יוצרים סשן חדש כאן, בשרת, במקום לדחות את הבקשה
+                int sessionId;
+                if (request.ChatSessionId.HasValue && request.ChatSessionId.Value > 0)
+                {
+                    sessionId = request.ChatSessionId.Value;
+                }
+                else
+                {
+                    var newSession = new ChatSession
+                    {
+                        UserId = request.UserId ?? 0,
+                        Title = "שיחה אוטומטית",
+                        CreatedAt = DateTime.UtcNow
+                    };
+                    _context.ChatSessions.Add(newSession);
+                    await _context.SaveChangesAsync();
+                    sessionId = newSession.Id;
+                }
+
                 // שמירת הודעת המשתמש
-                var userMsg = new ChatMessage { ChatSessionId = request.ChatSessionId, Sender = "user", Text = request.Text, Timestamp = DateTime.UtcNow };
+                var userMsg = new ChatMessage { ChatSessionId = sessionId, Sender = "user", Text = request.Text, Timestamp = DateTime.UtcNow };
                 _context.ChatMessages.Add(userMsg);
                 await _context.SaveChangesAsync();
 
-                // פנייה לקולאב
+                // 🌟 בונים את היסטוריית השיחה המלאה - כדי שהמודל יזכור את כל מה שדובר
+                var sessionMessages = await _context.ChatMessages
+                    .Where(m => m.ChatSessionId == sessionId)
+                    .OrderBy(m => m.Timestamp)
+                    .ToListAsync();
+
+                var historyForPython = sessionMessages.Select(m => new
+                {
+                    role = m.Sender == "user" ? "user" : "assistant",
+                    content = m.Text
+                }).ToList();
+
+                // 🌟 פנייה לשרת הפייתון המקומי (Gemini) - לא ל-Colab הישן
                 using var client = new HttpClient();
-                client.Timeout = TimeSpan.FromMinutes(3);
-                var payload = new { model = "architecture-bot", prompt = request.Text, stream = false };
+                client.Timeout = TimeSpan.FromMinutes(2);
+
+                var payload = new { history = historyForPython };
                 var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
 
-                var response = await client.PostAsync("https://varying-claw-dimly.ngrok-free.dev/api/generate", content);
-
-                // התיקון הקריטי: כאן הגדרנו את המשתנה rawResponse
+                var response = await client.PostAsync("http://127.0.0.1:5000/chat-program", content);
                 var rawResponse = await response.Content.ReadAsStringAsync();
 
-                // חילוץ המידע
-                string botReply = "";
+                string botReply = "מצטער, לא הצלחתי להבין. אפשר לנסות שוב?";
+                var rooms = new List<object>();
+                bool isFinished = false;
+
                 try
                 {
                     var root = JsonDocument.Parse(rawResponse).RootElement;
 
-                    if (root.TryGetProperty("response", out var res) && !string.IsNullOrEmpty(res.GetString()))
+                    if (root.TryGetProperty("reply", out var replyEl))
+                        botReply = replyEl.GetString() ?? botReply;
+
+                    if (root.TryGetProperty("rooms", out var roomsEl) && roomsEl.ValueKind == JsonValueKind.Array)
                     {
-                        botReply = res.GetString();
+                        rooms = roomsEl.EnumerateArray().Select(r => (object)new
+                        {
+                            name = r.TryGetProperty("name", out var n) ? n.GetString() : "חדר",
+                            area = r.TryGetProperty("area", out var a) ? a.GetDouble() : 12
+                        }).ToList();
                     }
-                    else if (root.TryGetProperty("thinking", out var think) && !string.IsNullOrEmpty(think.GetString()))
-                    {
-                        botReply = think.GetString();
-                    }
-                    else
-                    {
-                        botReply = rawResponse; // גיבוי: נציג את כל ה-JSON אם לא מצאנו שדות
-                    }
+
+                    if (root.TryGetProperty("is_finished", out var finEl))
+                        isFinished = finEl.GetBoolean();
                 }
                 catch
                 {
-                    botReply = rawResponse; // אם ה-JSON דפוק, נציג את הטקסט הגולמי
+                    botReply = rawResponse;
                 }
 
-                // שמירת הודעת הבוט
-                var botMsg = new ChatMessage { ChatSessionId = request.ChatSessionId, Sender = "assistant", Text = botReply, Timestamp = DateTime.UtcNow };
+                var botMsg = new ChatMessage { ChatSessionId = sessionId, Sender = "assistant", Text = botReply, Timestamp = DateTime.UtcNow };
                 _context.ChatMessages.Add(botMsg);
                 await _context.SaveChangesAsync();
 
-                return Ok(botMsg);
+                return Ok(new
+                {
+                    id = botMsg.Id,
+                    chatSessionId = sessionId, // 🌟 מוחזר לריאקט - כדי שהיא תעדכן את currentSessionId אם נוצר חדש כאן
+                    text = botMsg.Text,
+                    rooms = rooms,
+                    isFinished = isFinished
+                });
             }
             catch (TaskCanceledException)
             {
-                // זה מה שיקפוץ אם הבוט באמת עבר את ה-5 דקות (במקום השגיאה 500
                 Console.WriteLine("Timeout Error");
-                return StatusCode(500, "השרת בקולאב חשב יותר מדי זמן (מעל 5 דקות). ודאי שמוגדר לך GPU בקולאב.");
+                return StatusCode(500, "שרת הבינה המלאכותית לא הגיב בזמן.");
             }
             catch (Exception ex)
             {
