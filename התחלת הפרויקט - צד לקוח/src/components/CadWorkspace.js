@@ -3,7 +3,6 @@ import { PlotContext } from './PlotContext';
 import CadChat from './CadChat';
 import BubbleDiagram from './BubbleDiagram';
 import FurniturePlan from './FurniturePlan';
-import ManualDataPanel from './ManualDataPanel'
 
 export default function CadWorkspace({ currentUser, onLogout }) {
   const { programData } = useContext(PlotContext);
@@ -23,12 +22,7 @@ export default function CadWorkspace({ currentUser, onLogout }) {
       direction: 'rtl', background: '#f1f5f9', overflow: 'visible', position: 'relative'
     }}>
       <div style={{ width: '35%', height: '100%', borderLeft: '1px solid #e2e8f0', background: '#ffffff', display: 'flex', flexDirection: 'column' }}>
-        <div style={{ flex: 1, overflowY: 'auto' }}>
-          <CadChat currentUser={currentUser} onHistoryModeChange={setIsHistoryMode} />
-        </div>
-        <div style={{ height: '30%', borderTop: '1px solid #eee' }}>
-          <ManualDataPanel />
-        </div>
+        <CadChat currentUser={currentUser} onHistoryModeChange={setIsHistoryMode} />
       </div>
 
       <div style={{ width: '65%', height: '100%', padding: '20px', boxSizing: 'border-box', overflowY: 'auto' }}>

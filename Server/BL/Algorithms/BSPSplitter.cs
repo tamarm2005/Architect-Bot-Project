@@ -17,116 +17,88 @@ namespace BL.Algorithms
 
             if (livingRoom == null || otherRooms.Count == 0)
             {
-                SplitStrip(plot, rooms.OrderByDescending(r => r.Area).ToList(), placedRooms);
+                SplitMosaic(plot, rooms.OrderByDescending(r => r.Area).ToList(), placedRooms);
                 return placedRooms;
             }
 
             double totalArea = rooms.Sum(r => r.Area);
-            double livingShare = Math.Max(0.2, Math.Min(0.5, livingRoom.Area / totalArea));
+            double livingShare = Math.Max(0.15, Math.Min(0.4, livingRoom.Area / totalArea));
 
-            double livingWidth = plot.Width * Math.Sqrt(livingShare);
-            double livingLength = plot.Length * Math.Sqrt(livingShare);
-            double livingX = plot.X + (plot.Width - livingWidth) / 2;
-            double livingY = plot.Y + (plot.Length - livingLength) / 2;
+            // 🌟 הסלון תופס צד שלם (לא מרכז!) - כמו קיר קדמי אמיתי, עם גישה טבעית לכניסה
+            bool splitHorizontally = plot.Width >= plot.Length;
 
-            livingRoom.PositionX = livingX;
-            livingRoom.PositionY = livingY;
-            livingRoom.Width = livingWidth;
-            livingRoom.Length = livingLength;
+            Rectangle2D livingRect, restRect;
+            if (splitHorizontally)
+            {
+                double livingHeight = plot.Length * livingShare;
+                livingRect = new Rectangle2D { X = plot.X, Y = plot.Y, Width = plot.Width, Length = livingHeight };
+                restRect = new Rectangle2D { X = plot.X, Y = plot.Y + livingHeight, Width = plot.Width, Length = plot.Length - livingHeight };
+            }
+            else
+            {
+                double livingWidth = plot.Width * livingShare;
+                livingRect = new Rectangle2D { X = plot.X, Y = plot.Y, Width = livingWidth, Length = plot.Length };
+                restRect = new Rectangle2D { X = plot.X + livingWidth, Y = plot.Y, Width = plot.Width - livingWidth, Length = plot.Length };
+            }
+
+            livingRoom.PositionX = livingRect.X;
+            livingRoom.PositionY = livingRect.Y;
+            livingRoom.Width = livingRect.Width;
+            livingRoom.Length = livingRect.Length;
             placedRooms.Add(livingRoom);
 
-            // 🌟 4 רצועות סביב הסלון - כל רצועה צמודה ישירות אליו, בלי מסדרון בכלל
-            double topH = livingY - plot.Y;
-            double bottomH = (plot.Y + plot.Length) - (livingY + livingLength);
-            double leftW = livingX - plot.X;
-            double rightW = (plot.X + plot.Width) - (livingX + livingWidth);
-
-            var strips = new List<Rectangle2D>
-            {
-                new Rectangle2D { X = plot.X, Y = plot.Y, Width = plot.Width, Length = topH },
-                new Rectangle2D { X = plot.X, Y = livingY + livingLength, Width = plot.Width, Length = bottomH },
-                new Rectangle2D { X = plot.X, Y = livingY, Width = leftW, Length = livingLength },
-                new Rectangle2D { X = livingX + livingWidth, Y = livingY, Width = rightW, Length = livingLength }
-            }.Where(s => s.Width > 0.3 && s.Length > 0.3).OrderByDescending(s => s.Area).ToList();
-
-            if (strips.Count == 0) strips.Add(plot);
-
-            var stripAssignments = strips.Select(s => new List<ArchitecturalRoom>()).ToList();
-            for (int i = 0; i < otherRooms.Count; i++)
-            {
-                stripAssignments[i % strips.Count].Add(otherRooms[i]);
-            }
-
-            for (int i = 0; i < strips.Count; i++)
-            {
-                SplitStrip(strips[i], stripAssignments[i], placedRooms);
-            }
-
+            // 🌟 שאר החדרים מתחלקים במוזאיקה מאוזנת (לא רצועה ארוכה אחת!) - כל פיצול הוא לשניים, וחוזר רקורסיבית
+            SplitMosaic(restRect, otherRooms, placedRooms);
             return placedRooms;
         }
 
-        // ממלא רצועה ברהיטים ברצף לאורך הציר הארוך שלה - כל חדר ברצועה נוגע ישירות בסלון כי הרצועה עצמה צמודה אליו
-        private void SplitStrip(Rectangle2D area, List<ArchitecturalRoom> rooms, List<ArchitecturalRoom> result)
+        private void SplitMosaic(Rectangle2D area, List<ArchitecturalRoom> rooms, List<ArchitecturalRoom> result)
         {
             if (rooms.Count == 0) return;
 
-            bool horizontal = area.Width >= area.Length;
-            double longDim = horizontal ? area.Width : area.Length;
-            double shortDim = horizontal ? area.Length : area.Width;
-
-            // 🌟 אם הרצועה ארוכה מדי ביחס לרוחבה ויש כמה חדרים - מפצלים לשתי שורות במקום שורה אחת ארוכה
-            if (rooms.Count > 1 && longDim / Math.Max(shortDim, 0.1) > 2.2)
+            if (rooms.Count == 1)
             {
-                int half = Math.Max(1, rooms.Count / 2);
-                var group1 = rooms.Take(half).ToList();
-                var group2 = rooms.Skip(half).ToList();
-
-                Rectangle2D sub1, sub2;
-                if (horizontal)
-                {
-                    sub1 = new Rectangle2D { X = area.X, Y = area.Y, Width = area.Width, Length = area.Length / 2 };
-                    sub2 = new Rectangle2D { X = area.X, Y = area.Y + area.Length / 2, Width = area.Width, Length = area.Length / 2 };
-                }
-                else
-                {
-                    sub1 = new Rectangle2D { X = area.X, Y = area.Y, Width = area.Width / 2, Length = area.Length };
-                    sub2 = new Rectangle2D { X = area.X + area.Width / 2, Y = area.Y, Width = area.Width / 2, Length = area.Length };
-                }
-
-                SplitStrip(sub1, group1, result);
-                SplitStrip(sub2, group2, result);
+                var only = rooms[0];
+                only.PositionX = area.X;
+                only.PositionY = area.Y;
+                only.Width = area.Width;
+                only.Length = area.Length;
+                result.Add(only);
                 return;
             }
 
-            double remainingArea = rooms.Sum(r => r.Area);
-            double totalLength = longDim;
-            double usedLength = 0;
-
+            double totalArea = rooms.Sum(r => r.Area);
+            double running = 0;
+            int splitIndex = 1;
             for (int i = 0; i < rooms.Count; i++)
             {
-                var room = rooms[i];
-                bool isLast = i == rooms.Count - 1;
-                double sliceLength = isLast ? (totalLength - usedLength) : (totalLength - usedLength) * (room.Area / remainingArea);
-
-                if (horizontal)
-                {
-                    room.PositionX = area.X + usedLength;
-                    room.PositionY = area.Y;
-                    room.Width = sliceLength;
-                    room.Length = area.Length;
-                }
-                else
-                {
-                    room.PositionX = area.X;
-                    room.PositionY = area.Y + usedLength;
-                    room.Width = area.Width;
-                    room.Length = sliceLength;
-                }
-
-                usedLength += sliceLength;
-                remainingArea -= room.Area;
-                result.Add(room);
+                running += rooms[i].Area;
+                if (running >= totalArea / 2.0) { splitIndex = i + 1; break; }
             }
+            if (splitIndex >= rooms.Count) splitIndex = rooms.Count - 1;
+
+            var group1 = rooms.Take(splitIndex).ToList();
+            var group2 = rooms.Skip(splitIndex).ToList();
+            double group1Area = group1.Sum(r => r.Area);
+            double ratio = Math.Max(0.25, Math.Min(0.75, group1Area / totalArea));
+
+            bool horizontal = area.Width >= area.Length;
+            Rectangle2D rect1, rect2;
+            if (horizontal)
+            {
+                double w = area.Width * ratio;
+                rect1 = new Rectangle2D { X = area.X, Y = area.Y, Width = w, Length = area.Length };
+                rect2 = new Rectangle2D { X = area.X + w, Y = area.Y, Width = area.Width - w, Length = area.Length };
+            }
+            else
+            {
+                double l = area.Length * ratio;
+                rect1 = new Rectangle2D { X = area.X, Y = area.Y, Width = area.Width, Length = l };
+                rect2 = new Rectangle2D { X = area.X, Y = area.Y + l, Width = area.Width, Length = area.Length - l };
+            }
+
+            SplitMosaic(rect1, group1, result);
+            SplitMosaic(rect2, group2, result);
         }
     }
 }

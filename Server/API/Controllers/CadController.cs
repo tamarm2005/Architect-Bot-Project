@@ -642,22 +642,38 @@ namespace CadProject.Controllers
                 string baseFurniturePath = Path.Combine(tempFolder, "1_Furniture_Plan.dxf");
                 doc.Save(baseFurniturePath);
 
-                var dimService = new BL.Algorithms.DimensionsService();
-                string dimPath = dimService.GenerateDimensionsPlan(baseFurniturePath);
-                if (!dimPath.StartsWith("Error")) System.IO.File.Copy(dimPath, Path.Combine(tempFolder, "2_Dimensions_Plan.dxf"));
+                try
+                {
+                    var dimService = new BL.Algorithms.DimensionsService();
+                    string dimPath = dimService.GenerateDimensionsPlan(baseFurniturePath);
+                    if (!dimPath.StartsWith("Error")) System.IO.File.Copy(dimPath, Path.Combine(tempFolder, "2_Dimensions_Plan.dxf"));
+                }
+                catch (Exception ex) { Console.WriteLine($"⚠️ שגיאה ביצירת תוכנית מידות (מדלגים): {ex.Message}"); }
 
-                var elevService = new BL.Algorithms.ElevationService();
-                string elevPath = elevService.GenerateElevationsPlan(baseFurniturePath);
-                if (!elevPath.StartsWith("Error")) System.IO.File.Copy(elevPath, Path.Combine(tempFolder, "3_Elevations_Plan.dxf"));
+                try
+                {
+                    var elevService = new BL.Algorithms.ElevationService();
+                    string elevPath = elevService.GenerateElevationsPlan(baseFurniturePath);
+                    if (!elevPath.StartsWith("Error")) System.IO.File.Copy(elevPath, Path.Combine(tempFolder, "3_Elevations_Plan.dxf"));
+                }
+                catch (Exception ex) { Console.WriteLine($"⚠️ שגיאה ביצירת חזיתות (מדלגים): {ex.Message}"); }
 
-                var secGenerator = new BL.Algorithms.SectionGenerator();
-                var sections = secGenerator.GenerateAutoSections(doc);
-                if (sections.ContainsKey("Section_AA")) sections["Section_AA"].Save(Path.Combine(tempFolder, "4_Section_AA.dxf"));
+                try
+                {
+                    var secGenerator = new BL.Algorithms.SectionGenerator();
+                    var sections = secGenerator.GenerateAutoSections(doc);
+                    if (sections.ContainsKey("Section_AA")) sections["Section_AA"].Save(Path.Combine(tempFolder, "4_Section_AA.dxf"));
+                }
+                catch (Exception ex) { Console.WriteLine($"⚠️ שגיאה ביצירת חתך (מדלגים): {ex.Message}"); }
 
-                var roofService = new BL.Algorithms.RoofService();
-                var roofSpec = new BL.Algorithms.RoofService.RoofSpecification { RoofType = "parapet", SlopePercent = 1.5, WallThickness = 20.0 };
-                string roofPath = roofService.GenerateRoofPlanFromWalls(exteriorWalls, roofSpec);
-                if (!roofPath.StartsWith("Error")) System.IO.File.Copy(roofPath, Path.Combine(tempFolder, "5_Roof_Plan.dxf"));
+                try
+                {
+                    var roofService = new BL.Algorithms.RoofService();
+                    var roofSpec = new BL.Algorithms.RoofService.RoofSpecification { RoofType = "parapet", SlopePercent = 1.5, WallThickness = 20.0 };
+                    string roofPath = roofService.GenerateRoofPlanFromWalls(exteriorWalls, roofSpec);
+                    if (!roofPath.StartsWith("Error")) System.IO.File.Copy(roofPath, Path.Combine(tempFolder, "5_Roof_Plan.dxf"));
+                }
+                catch (Exception ex) { Console.WriteLine($"⚠️ שגיאה ביצירת גג (מדלגים): {ex.Message}"); }
 
                 ZipFile.CreateFromDirectory(tempFolder, zipFilePath);
                 var fileBytes = System.IO.File.ReadAllBytes(zipFilePath);
