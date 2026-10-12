@@ -1,13 +1,38 @@
-// התחברות 
+// התחברות
 
-import React, { useState } from "react"; 
-import { useNavigate } from "react-router-dom"; // 🌟 הוספנו ניווט
+import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
 
-export default function LoginSite({ userList, enterUser }) {
+export default function LoginSite({ enterUser }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  let navigate = useNavigate(); // 🌟 הגדרת הניווט
-  
+  const [isLoading, setIsLoading] = useState(false);
+  let navigate = useNavigate();
+
+  const handleLogin = async () => {
+    setIsLoading(true);
+    try {
+      const response = await fetch('http://localhost:5245/api/User/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        enterUser(data.user, data.token);
+      } else {
+        const errText = await response.text();
+        alert(errText || "פרטי התחברות שגויים!");
+      }
+    } catch (error) {
+      console.error("שגיאת התחברות:", error);
+      alert("שגיאה בחיבור לשרת.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
     <div className="auth-wrapper">
       <div className="auth-card">
@@ -17,7 +42,7 @@ export default function LoginSite({ userList, enterUser }) {
             type="email"
             placeholder="כתובת אימייל"
             className="auth-input"
-            onChange={(e) => setEmail(e.target.value)} 
+            onChange={(e) => setEmail(e.target.value)}
           />
           <input
             type="password"
@@ -29,26 +54,17 @@ export default function LoginSite({ userList, enterUser }) {
             type="button"
             className="btn-primary"
             style={{ marginTop: "10px" }}
-            onClick={() => { 
-              const myUser = userList.find(
-                (user) => user.email === email && user.password === password
-              );
-              if (myUser) {
-                enterUser(myUser);
-              } else {
-                alert("פרטי התחברות שגויים!");
-              }
-            }}
+            disabled={isLoading}
+            onClick={handleLogin}
           >
-            התחבר
+            {isLoading ? "מתחברת..." : "התחבר"}
           </button>
         </form>
 
-        {/* 🌟 לחצן חזרה/מעבר להרשמה מעוצב ועדין */}
         <div style={{ marginTop: "20px", fontSize: "14px", color: "#666", textAlign: "center" }}>
           <span>עדיין אין לך חשבון? </span>
-          <button 
-            type="button" 
+          <button
+            type="button"
             onClick={() => navigate("/RegistrationSite")}
             style={{
               background: "none",
@@ -64,7 +80,6 @@ export default function LoginSite({ userList, enterUser }) {
             להרשמה מהירה
           </button>
         </div>
-
       </div>
     </div>
   );

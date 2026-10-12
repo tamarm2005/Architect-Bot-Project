@@ -122,6 +122,9 @@ namespace DAL.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<string>("RoomsSnapshot")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<string>("Title")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
@@ -150,6 +153,9 @@ namespace DAL.Migrations
 
                     b.Property<double>("Height")
                         .HasColumnType("float");
+
+                    b.Property<bool>("IsFixed")
+                        .HasColumnType("bit");
 
                     b.Property<string>("ItemName")
                         .IsRequired()

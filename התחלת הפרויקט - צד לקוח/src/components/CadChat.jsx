@@ -29,6 +29,18 @@ const CadChat = ({ currentUser, onHistoryModeChange }) => {
         }
     }, [currentUser]);
 
+    // 🌟 כל קריאה לשרת מצרפת אוטומטית את הטוקן - בלי זה [Authorize] ידחה הכל
+    const authFetch = (url, options = {}) => {
+        const token = localStorage.getItem('authToken');
+        return fetch(url, {
+            ...options,
+            headers: {
+                ...(options.headers || {}),
+                ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+            }
+        });
+    };
+
     const [message, setMessage] = useState('');
 
     const [chatHistory, setChatHistory] = useState([
@@ -69,27 +81,22 @@ const CadChat = ({ currentUser, onHistoryModeChange }) => {
     // פונקציית אתחול: טוענת היסטוריה ומייצרת שיחה חדשה אוטומטית
     const initChatForUser = async (activeUserId) => {
         try {
-            // א. קודם כל נטען את רשימת השיחות הישנות בשביל ה-Sidebar
-            const response = await fetch(`http://localhost:5245/api/chat/user-sessions/${activeUserId}`);
+            const response = await authFetch(`http://localhost:5245/api/chat/user-sessions`);
             if (response.ok) {
                 const data = await response.json();
                 setPastSessions(data);
             }
 
-            // ב. ✨ הקסם קורה כאן: במקום לטעון שיחה ישנה, יוצרים מיד סשן חדש ונקי לשרת!
             const chatTitle = `שיחה חדשה - ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-            const newSessionResponse = await fetch(`http://localhost:5245/api/chat/new-session?userId=${activeUserId}&title=${encodeURIComponent(chatTitle)}`, {
+            const newSessionResponse = await authFetch(`http://localhost:5245/api/chat/new-session?title=${encodeURIComponent(chatTitle)}`, {
                 method: 'POST'
             });
 
             if (newSessionResponse.ok) {
                 const newSession = await newSessionResponse.json();
-                setCurrentSessionId(newSession.id); // משייך את ההודעות הבאות לסשן החדש
-
-                // מעדכן את רשימת השיחות בצד כדי שהשיחה החדשה תופיע שם
+                setCurrentSessionId(newSession.id);
                 setPastSessions(prev => [newSession, ...prev]);
             }
-
         } catch (error) {
             console.error("שגיאה באתחול השיחה החדשה למשתמש:", error);
         }
@@ -98,7 +105,7 @@ const CadChat = ({ currentUser, onHistoryModeChange }) => {
     // פונקציית גישור כדי למנוע את שגיאת ה-ESLint
     const loadUserSessions = async (activeUserId) => {
         try {
-            const response = await fetch(`http://localhost:5245/api/chat/user-sessions/${activeUserId}`);
+            const response = await authFetch(`http://localhost:5245/api/chat/user-sessions`);
             if (response.ok) {
                 const data = await response.json();
                 setPastSessions(data);
@@ -118,9 +125,10 @@ const CadChat = ({ currentUser, onHistoryModeChange }) => {
             const title = prompt("הזיני שם לשיחה החדשה:", `שיחה מ-${new Date().toLocaleDateString()}`);
             if (!title) return;
 
-            const response = await fetch(`http://localhost:5245/api/chat/new-session?userId=${userId}&title=${encodeURIComponent(title)}`, {
+            const response = await authFetch(`http://localhost:5245/api/chat/new-session?title=${encodeURIComponent(title)}`, {
                 method: 'POST'
             });
+
             if (response.ok) {
                 const newSession = await response.json();
                 setCurrentSessionId(newSession.id);
@@ -140,10 +148,9 @@ const CadChat = ({ currentUser, onHistoryModeChange }) => {
     const handleSelectSession = async (sessionId) => {
         try {
             setCurrentSessionId(sessionId);
-            const response = await fetch(`http://localhost:5245/api/chat/session-messages/${sessionId}`);
+            const response = await authFetch(`http://localhost:5245/api/chat/session-messages/${sessionId}`);
             if (response.ok) {
                 const messagesFromDb = await response.json();
-
                 if (messagesFromDb.length === 0) {
                     setChatHistory([{ sender: 'bot', text: 'השיחה הזו ריקה. רשמי הודעה כדי להתחיל!' }]);
                 } else {
@@ -153,9 +160,19 @@ const CadChat = ({ currentUser, onHistoryModeChange }) => {
                     }));
                     setChatHistory(formattedMessages);
                 }
-                setShowHistorySidebar(false);
-                if (onHistoryModeChange) onHistoryModeChange(true);
             }
+
+            // 🌟 שחזור השרטוט (רשימת החדרים) ששייך בדיוק לשיחה הזו
+            const roomsResponse = await authFetch(`http://localhost:5245/api/chat/session-rooms/${sessionId}`);
+            if (roomsResponse.ok) {
+                const roomsFromDb = await roomsResponse.json();
+                if (roomsFromDb && roomsFromDb.length > 0) {
+                    setProgramData(prev => ({ ...prev, rooms: roomsFromDb }));
+                }
+            }
+
+            setShowHistorySidebar(false);
+            if (onHistoryModeChange) onHistoryModeChange(false); // 🌟 מציגים את השרטוט האמיתי של השיחה, לא מסתירים אותו יותר
         } catch (error) {
             console.error("שגיאה בשליפת הודעות השיחה:", error);
         }
@@ -171,7 +188,7 @@ const CadChat = ({ currentUser, onHistoryModeChange }) => {
 
         try {
             // פנייה לשרת ה-C# למחיקת השיחה
-            const response = await fetch(`http://localhost:5245/api/chat/session/${sessionId}`, {
+            const response = await authFetch(`http://localhost:5245/api/chat/session/${sessionId}`, {
                 method: 'DELETE'
             });
 
@@ -222,8 +239,7 @@ const CadChat = ({ currentUser, onHistoryModeChange }) => {
         // 1. ניהול סשן
         if (!activeSessionId && userId) {
             try {
-                const response = await fetch(`http://localhost:5245/api/chat/new-session?userId=${userId}&title=שיחה אוטומטית`, { method: 'POST' });
-                const newSession = await response.json();
+                const response = await authFetch(`http://localhost:5245/api/chat/new-session?title=שיחה אוטומטית`, { method: 'POST' }); const newSession = await response.json();
                 activeSessionId = newSession.id;
                 setCurrentSessionId(activeSessionId);
                 loadUserSessions(userId);
@@ -232,11 +248,12 @@ const CadChat = ({ currentUser, onHistoryModeChange }) => {
 
         try {
             // 2. פנייה לשרת
-            const response = await fetch('http://localhost:5245/api/chat/add-message', {
+            const response = await authFetch('http://localhost:5245/api/chat/add-message', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ chatSessionId: activeSessionId, sender: "user", text: textToSend, userId: userId }),            });
-
+                body: JSON.stringify({ chatSessionId: activeSessionId, sender: "user", text: textToSend }),
+            });
+            
             if (!response.ok) throw new Error(`שרת Backend החזיר שגיאה: ${response.status}`);
 
             const result = await response.json();

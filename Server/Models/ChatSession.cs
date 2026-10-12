@@ -15,5 +15,7 @@ namespace Models
 
         // קשר של אחד לרבים - לכל שיחה יש הרבה הודעות
         public List<ChatMessage> Messages { get; set; } = [];
+
+        public string? RoomsSnapshot { get; set; } //  "תמונת מצב" של רשימת החדרים ששייכת לשיחה הזו
     }
 }

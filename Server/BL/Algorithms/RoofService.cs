@@ -56,9 +56,25 @@ namespace BL.Algorithms
                 return "Error: לא התקבלו קירות מהשרטוט המקורי.";
             }
 
+            // המערכת עובדת במטרים, והשירות הזה בס"מ - ממירים אם צריך
+            double maxCoord = inputWalls.Max(w => Math.Max(
+                Math.Max(Math.Abs(w.StartPoint.X), Math.Abs(w.EndPoint.X)),
+                Math.Max(Math.Abs(w.StartPoint.Y), Math.Abs(w.EndPoint.Y))));
+            if (maxCoord < 200.0)
+            {
+                inputWalls = inputWalls.Select(w => new Line(
+                    new Vector2(w.StartPoint.X * 100, w.StartPoint.Y * 100),
+                    new Vector2(w.EndPoint.X * 100, w.EndPoint.Y * 100))
+                { Layer = w.Layer }).ToList();
+            }
+            if (spec.WallThickness < 5.0) spec.WallThickness *= 100;
+
             var roofLayer = CreateRoofLayer(doc);
 
             List<Line> cleanWalls = DrawOriginalWallsAndFilter(doc, inputWalls, roofLayer);
+
+            if (!cleanWalls.Any())
+                return "Error: כל הקירות קצרים מדי אחרי סינון.";
 
             double minX = cleanWalls.Min(w => Math.Min(w.StartPoint.X, w.EndPoint.X));
             double maxX = cleanWalls.Max(w => Math.Max(w.StartPoint.X, w.EndPoint.X));
@@ -79,8 +95,8 @@ namespace BL.Algorithms
             DrawParapetAnnotations(doc, center, maxY, roofLayer);
 
             string outputPath = Path.Combine(Path.GetTempPath(), $"Roof_Parapet_{Guid.NewGuid()}.dxf");
+            HebrewFontFixer.ApplyToDoc(doc);
             doc.Save(outputPath);
-
             return outputPath;
         }
 

@@ -21,30 +21,18 @@ function App() {
     }
   }, []);
 
-  // רשימת משתמשים זמנית
-  // רשימת משתמשים זמנית עם מזהה ייחודי (id) לכל אחד
-  const [userList, setUserList] = useState([
-    { id: 1, userName: "rivka", email: "r@a.com", password: "1234" },
-    { id: 2, userName: "sara", email: "s@a.com", password: "5678" },
-    { id: 3, userName: "tamar", email: "ta@a.com", password: "1122" },
-    { id: 4, userName: "shira", email: "shi@a.com", password: "2233" },
-    { id: 5, userName: "shoham", email: "sh@a.com", password: "3344" },
-    { id: 6, userName: "dvora", email: "d@a.com", password: "4455" },
-    { id: 7, userName: "michal", email: "mi@a.com", password: "5566" },
-    { id: 8, userName: "meital", email: "m@a.com", password: "6677" },
-    { id: 9, userName: "liraz", email: "li@a.com", password: "8899" }
-  ]);
-
-  // פונקציית כניסת משתמש
-  const enterUser = (user) => {
+  // 🌟 כניסת משתמש - עכשיו שומר גם את ה-Token (JWT) שחוזר מהשרת
+  const enterUser = (user, token) => {
     setCurrentUser(user);
     localStorage.setItem('currentUser', JSON.stringify(user));
+    if (token) localStorage.setItem('authToken', token);
     navigate("/plan-program");
   };
 
   const handleLogout = () => {
     setCurrentUser(null);
     localStorage.removeItem('currentUser');
+    localStorage.removeItem('authToken');
     navigate("/");
   };
 
@@ -109,16 +97,16 @@ function App() {
         <Routes>
           <Route path="/" element={< Home />} />
           <Route path="/RegistrationSite" element={
-            <RegistrationSite userList={userList} setUserList={setUserList} enterUser={enterUser} />
+            <RegistrationSite enterUser={enterUser} />
           } />
           <Route path="/LoginSite" element={
-            <LoginSite userList={userList} enterUser={enterUser} />
+            <LoginSite enterUser={enterUser} />
           } />
           <Route path="/select-plot" element={<SelectPlot />} />
           <Route path="/plan-program" element={
             currentUser
               ? <CadWorkspace currentUser={currentUser} onLogout={handleLogout} />
-              : <LoginSite userList={userList} enterUser={enterUser} />
+              : <LoginSite enterUser={enterUser} />
           } />
           <Route path="/d" element={<D />} />
         </Routes>

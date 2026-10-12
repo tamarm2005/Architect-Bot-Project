@@ -1,135 +1,261 @@
-﻿using netDxf;
-using netDxf.Entities;
-using netDxf.Header;
-using System;
+﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
+using netDxf;
+using netDxf.Entities;
+using netDxf.Tables;
 
 namespace BL.Algorithms
 {
     public class SectionGenerator
     {
-        // --- הגדרות חוק ותקנים (בסנטימטרים) ---
-        private const double FloorThickness = 20.0;     // עובי רצפה
-        private const double CeilingHeight = 260.0;     // גובה תקרה נטו מריצוף לריצוף (תקני)
-        private const double CeilingThickness = 20.0;   // עובי תקרה/גג
-        private const double GroundLevel = -20.0;       // מפלס פיתוח החוץ (אדמה) ביחס ל-0.00 של הבית
+        private const double K = DxfUtil.K;
+        private const double FloorT = 20;      // רצפה
+        private const double ClearH = 260;     // גובה נקי
+        private const double SlabT = 20;       // תקרה
+        private const double ParapetH = 60;
+        private const double FootDepth = 80;   // עומק יסוד
+        private const double FloorAbove = 15;  // רצפה מעל פני קרקע
 
-        // פונקציה ראשית שמייצרת את שני החתכים באופן אוטומטי
+        private class Cut { public bool H; public double C; public double Score; }
+        private class Wall { public double P, Q, A, B; public bool Ext; public OpeningInfo Op; }
+
+        // תאימות לאחור: קבלת DxfDocument
         public Dictionary<string, DxfDocument> GenerateAutoSections(DxfDocument planDxf)
         {
-            var result = new Dictionary<string, DxfDocument>();
-
-            // 1. מציאת גבולות המבנה בשרטוט (Bounding Box) כדי לדעת איפה האמצע
-            var allLines = planDxf.Entities.Lines.ToList();
-            if (!allLines.Any()) return result; // אם השרטוט ריק
-
-            double minX = allLines.Min(l => Math.Min(l.StartPoint.X, l.EndPoint.X));
-            double maxX = allLines.Max(l => Math.Max(l.StartPoint.X, l.EndPoint.X));
-            double minY = allLines.Min(l => Math.Min(l.StartPoint.Y, l.EndPoint.Y));
-            double maxY = allLines.Max(l => Math.Max(l.StartPoint.Y, l.EndPoint.Y));
-
-            double midX = (minX + maxX) / 2.0; // אמצע המבנה בציר X
-            double midY = (minY + maxY) / 2.0; // אמצע המבנה בציר Y
-            double margin = 100.0; // שוליים של מטר מחוץ למבנה לקווי החתך
-
-            // 2. יצירת חתך AA (אופקי - חותך את המבנה לרוחב/אורך)
-            Vector2 startAA = new Vector2(minX - margin, midY);
-            Vector2 endAA = new Vector2(maxX + margin, midY);
-            result.Add("Section_AA", CreateSingleSection(planDxf, startAA, endAA, isHorizontal: true));
-
-            // 3. יצירת חתך BB (אנכי - חותך את המבנה לאורך/רוחב)
-            Vector2 startBB = new Vector2(midX, minY - margin);
-            Vector2 endBB = new Vector2(midX, maxY + margin);
-            result.Add("Section_BB", CreateSingleSection(planDxf, startBB, endBB, isHorizontal: false));
-
-            return result;
+            return GenerateAutoSections(DxfUtil.FromDxf(planDxf));
         }
 
-        // פונקציה שמייצרת חתך בודד לפי קו חיתוך שמועבר אליה
-        private DxfDocument CreateSingleSection(DxfDocument planDxf, Vector2 cutStart, Vector2 cutEnd, bool isHorizontal)
+        // מחזיר את שני החתכים: AA (אופקי, מבט צפונה) ו-BB (אנכי, מבט מזרחה)
+        public Dictionary<string, DxfDocument> GenerateAutoSections(BuildingGeometry g)
         {
-            DxfDocument sectionDoc = new DxfDocument();
-            double sectionLength = Vector2.Distance(cutStart, cutEnd);
+            var res = new Dictionary<string, DxfDocument>();
+            if (g == null || g.Rooms.Count == 0 || g.Outline.Count < 3) return res;
 
-            // 1. שרטוט קווי בסיס: רצפה ותקרה
-            // קו ריצוף 0.00
-            sectionDoc.Entities.Add(new Line(new Vector2(0, 0), new Vector2(sectionLength, 0)));
-            // תחתית רצפה (בטון)
-            sectionDoc.Entities.Add(new Line(new Vector2(0, -FloorThickness), new Vector2(sectionLength, -FloorThickness)));
-            // קו תקרה נטו
-            sectionDoc.Entities.Add(new Line(new Vector2(0, CeilingHeight), new Vector2(sectionLength, CeilingHeight)));
-            // גג עליון
-            sectionDoc.Entities.Add(new Line(new Vector2(0, CeilingHeight + CeilingThickness), new Vector2(sectionLength, CeilingHeight + CeilingThickness)));
+            var a = ChooseCut(g, true);
+            var b = ChooseCut(g, false);
+            if (a != null) res["Section_AA"] = Build(g, a, "A-A");
+            if (b != null) res["Section_BB"] = Build(g, b, "B-B");
+            return res;
+        }
 
-            // 2. המצאת טופוגרפיה (מפלסי מגרש הגיוניים בצדדים)
-            DrawTopography(sectionDoc, sectionLength);
-
-            // 3. מציאת קירות נחתכים!
-            // מומלץ לסנן כאן לפי שכבה, למשל: planDxf.Lines.Where(l => l.Layer.Name == "Walls")
-            var walls = planDxf.Entities.Lines.ToList();
-            List<double> hitPositions = new List<double>();
-
-            foreach (var line in walls)
+        // ---------- בחירת קו החתך החכם ----------
+        private Cut ChooseCut(BuildingGeometry g, bool h)
+        {
+            double lo = h ? g.MinY : g.MinX, hi = h ? g.MaxY : g.MaxX, mid = (lo + hi) / 2;
+            Cut best = null;
+            for (double c = lo + 0.5; c < hi - 0.5; c += 0.1)
             {
-                Vector2 lineStart = new Vector2(line.StartPoint.X, line.StartPoint.Y);
-                Vector2 lineEnd = new Vector2(line.EndPoint.X, line.EndPoint.Y);
+                double s = Score(g, h, c);
+                if (s < -1e8) continue;
+                s -= Math.Abs(c - mid) * 0.15;
+                if (best == null || s > best.Score) best = new Cut { H = h, C = c, Score = s };
+            }
+            return best;
+        }
 
-                // אם קו החתך פוגע בקו של הקיר
-                if (TryGetIntersection(cutStart, cutEnd, lineStart, lineEnd, out Vector2 intersectionPoint))
+        private double Score(BuildingGeometry g, bool h, double c)
+        {
+            // לא עוברים על קיר מקביל (זה ייתן "קיר שלם" ולא חתך)
+            foreach (var r in g.Rooms)
+            {
+                double e0 = h ? r.Y : r.X, e1 = h ? r.Y + r.L : r.X + r.W;
+                if (Math.Abs(c - e0) < 0.3 || Math.Abs(c - e1) < 0.3) return -1e9;
+            }
+            var crossed = g.Rooms.Where(r => h ? (r.Y < c && c < r.Y + r.L) : (r.X < c && c < r.X + r.W)).ToList();
+            if (crossed.Count == 0) return -1e9;
+
+            double s = crossed.Count;
+            if (crossed.Any(r => DxfUtil.IsLiving(r.Name))) s += 4;
+            if (crossed.Any(r => DxfUtil.IsWet(r.Name))) s += 3;
+            if (crossed.Any(r => DxfUtil.IsBedroom(r.Name))) s += 1.5;
+
+            double open = 0;
+            foreach (var o in g.Openings)
+            {
+                double along = h ? o.X : o.Y, perp = h ? o.Y : o.X;
+                if (Math.Abs(perp - c) > o.Width / 2 - 0.05) continue;
+                bool onWall = g.Rooms.Any(r => Math.Abs(along - (h ? r.X : r.Y)) < 0.35 ||
+                                               Math.Abs(along - (h ? r.X + r.W : r.Y + r.L)) < 0.35);
+                if (onWall) open += o.IsDoor ? 3 : 2.5;
+            }
+            s += Math.Min(open, 10);
+
+            double furn = 0;
+            foreach (var r in crossed)
+                foreach (var f in r.Furniture)
+                    if (h ? (f.Y0 < c && c < f.Y1) : (f.X0 < c && c < f.X1)) furn += 0.4;
+            s += Math.Min(furn, 4);
+            return s;
+        }
+
+        // ---------- בניית החתך ----------
+        private DxfDocument Build(BuildingGeometry g, Cut cut, string label)
+        {
+            var doc = new DxfDocument();
+            var s = new Sheet(doc, 0, 0);
+            var lCut = DxfUtil.Lay(doc, "A-SECT-CUT", 7, Lineweight.W50);
+            var lHatch = DxfUtil.Lay(doc, "A-SECT-HATCH", 8);
+            var lBeyond = DxfUtil.Lay(doc, "A-SECT-BEYOND", 8);
+            var lFurn = DxfUtil.Lay(doc, "A-SECT-FURN", 6);
+            var lFurnCut = DxfUtil.Lay(doc, "A-SECT-FURN-CUT", 1);
+            var lGround = DxfUtil.Lay(doc, "A-SECT-GROUND", 3, Lineweight.W50);
+            var lWin = DxfUtil.Lay(doc, "A-SECT-GLASS", 4);
+            var lDim = DxfUtil.Lay(doc, "A-SECT-DIM", 2);
+            var lTxt = DxfUtil.Lay(doc, "A-TEXT", 7);
+
+            bool h = cut.H; double c = cut.C;
+            double origin = h ? g.MinX : g.MinY, end = h ? g.MaxX : g.MaxY;
+            double Ltot = (end - origin) * K;
+            double slabTop = ClearH + SlabT, top = slabTop + ParapetH;
+
+            // אופקי: משמאל (מערב) לימין (מזרח). אנכי: מבט מזרחה, אז הצפון משמאל.
+            double T(double v) => h ? (v - origin) * K : (end - v) * K;
+            double A0(RoomInfo r) => h ? r.X : r.Y;
+            double A1(RoomInfo r) => h ? r.X + r.W : r.Y + r.L;
+            double Along(OpeningInfo o) => h ? o.X : o.Y;
+            double Perp(OpeningInfo o) => h ? o.Y : o.X;
+
+            var crossed = g.Rooms.Where(r => h ? (r.Y < c && c < r.Y + r.L) : (r.X < c && c < r.X + r.W))
+                                 .OrderBy(r => A0(r)).ToList();
+
+            // 1. קירות נחתכים: מאחדים קצוות חדרים סמוכים לקיר אחד
+            var raw = new List<double>();
+            foreach (var r in crossed) { raw.Add(A0(r)); raw.Add(A1(r)); }
+            raw.Sort();
+            var pos = new List<double>();
+            foreach (var v in raw)
+            {
+                if (pos.Count > 0 && v - pos[pos.Count - 1] < 0.12) pos[pos.Count - 1] = (pos[pos.Count - 1] + v) / 2;
+                else pos.Add(v);
+            }
+
+            var walls = new List<Wall>();
+            foreach (var p in pos)
+            {
+                double q = T(p);
+                var w = new Wall { P = p, Q = q };
+                if (q < 45) { w.Ext = true; double th = Math.Clamp(q, 10, 35); w.A = q - th; w.B = q; }
+                else if (Ltot - q < 45) { w.Ext = true; double th = Math.Clamp(Ltot - q, 10, 35); w.A = q; w.B = q + th; }
+                else { w.A = q - 5; w.B = q + 5; }
+                double pp = p;
+                w.Op = g.Openings.Where(o => Math.Abs(Along(o) - pp) < 0.35 && Math.Abs(Perp(o) - c) < o.Width / 2)
+                                 .OrderBy(o => Math.Abs(Perp(o) - c)).FirstOrDefault();
+                walls.Add(w);
+            }
+            walls = walls.OrderBy(w => w.Q).ToList();
+
+            // 2. רצפה ותקרה
+            s.Rect(0, -FloorT, Ltot, 0, lCut);
+            s.Poche(0, -FloorT, Ltot, 0, 20, lHatch);
+            s.Rect(0, ClearH, Ltot, slabTop, lCut);
+            s.Poche(0, ClearH, Ltot, slabTop, 20, lHatch);
+
+            // 3. יסודות, קירות (עם פתחים), מעקה
+            foreach (var w in walls)
+            {
+                double mid = (w.A + w.B) / 2;
+                s.Rect(mid - 30, -FootDepth, mid + 30, -FloorT, lCut);
+                s.Poche(mid - 30, -FootDepth, mid + 30, -FloorT, 30, lHatch);
+
+                if (w.Op == null)
                 {
-                    // חישוב המיקום של הקיר בתוך השרטוט של החתך החדש
-                    double positionX = isHorizontal ? (intersectionPoint.X - cutStart.X) : (intersectionPoint.Y - cutStart.Y);
-                    hitPositions.Add(positionX);
+                    s.Rect(w.A, 0, w.B, ClearH, lCut);
+                    s.Poche(w.A, 0, w.B, ClearH, 15, lHatch);
+                }
+                else if (w.Op.IsDoor)
+                {
+                    s.Rect(w.A, DxfUtil.HeadCm, w.B, ClearH, lCut);       // משקוף בלבד מעל הדלת
+                    s.Poche(w.A, DxfUtil.HeadCm, w.B, ClearH, 15, lHatch);
+                }
+                else
+                {
+                    double sill = DxfUtil.SillCm(w.Op);
+                    s.Rect(w.A, 0, w.B, sill, lCut);
+                    s.Poche(w.A, 0, w.B, sill, 15, lHatch);
+                    s.Rect(w.A, DxfUtil.HeadCm, w.B, ClearH, lCut);
+                    s.Poche(w.A, DxfUtil.HeadCm, w.B, ClearH, 15, lHatch);
+                    s.Ln(mid - 1.5, sill, mid - 1.5, DxfUtil.HeadCm, lWin);   // זיגוג כפול
+                    s.Ln(mid + 1.5, sill, mid + 1.5, DxfUtil.HeadCm, lWin);
+                }
+
+                if (w.Ext)
+                {
+                    s.Rect(w.A, slabTop, w.B, top, lCut);
+                    s.Poche(w.A, slabTop, w.B, top, 15, lHatch);
+                }
+            }
+            var ext = walls.Where(w => w.Ext).ToList();
+            if (ext.Count >= 2) s.Ln(ext.First().B, slabTop + 4, ext.Last().A, slabTop + 4, lBeyond);   // גימור גג
+
+            // 4. קרקע משני הצדדים
+            s.Ln(-250, -FloorAbove, 0, -FloorAbove, lGround);
+            s.Ln(Ltot, -FloorAbove, Ltot + 250, -FloorAbove, lGround);
+            s.Poche(-250, -60, 0, -FloorAbove, 25, lGround);
+            s.Poche(Ltot, -60, Ltot + 250, -FloorAbove, 25, lGround);
+
+            // 5. ריהוט: חתוך (אדום) ומה שנראה מאחור (דק)
+            foreach (var r in crossed)
+            {
+                foreach (var f in r.Furniture)
+                {
+                    double f0 = h ? f.X0 : f.Y0, f1 = h ? f.X1 : f.Y1;
+                    double p0 = h ? f.Y0 : f.X0, p1 = h ? f.Y1 : f.X1;
+                    double xa = T(f0), xb = T(f1);
+                    if (xa > xb) { var t = xa; xa = xb; xb = t; }
+                    double hh = DxfUtil.FurnHeight(f.Name);
+                    if (p0 < c && c < p1) s.Rect(xa, 0, xb, hh, lFurnCut);
+                    else if (p0 > c) s.Rect(xa, 0, xb, hh, lFurn);
+                }
+
+                // פתחים בקיר הרחוק של החדר (נראים מאחורי החתך)
+                double far = h ? r.Y + r.L : r.X + r.W;
+                foreach (var o in g.Openings)
+                {
+                    if (Math.Abs(Perp(o) - far) > 0.35) continue;
+                    if (Along(o) < A0(r) || Along(o) > A1(r)) continue;
+                    double xa = T(Along(o) - o.Width / 2), xb = T(Along(o) + o.Width / 2);
+                    if (xa > xb) { var t = xa; xa = xb; xb = t; }
+                    double y0 = o.IsDoor ? 0 : DxfUtil.SillCm(o);
+                    s.Rect(xa, y0, xb, DxfUtil.HeadCm, lBeyond);
                 }
             }
 
-            // מיון נקודות החיתוך משמאל לימין
-            hitPositions.Sort();
-
-            // 4. ציור הקירות האנכיים בחתך
-            // מכיוון שבתוכנית אדריכלית לקיר יש 2 קווים (פנים וחוץ), הקוד יפגע בשניהם ויצייר שני קווים אוטומטית!
-            foreach (var posX in hitPositions)
+            // 6. שמות חדרים בין הקירות
+            for (int i = 0; i < walls.Count - 1; i++)
             {
-                Line verticalWallLine = new Line(new Vector2(posX, -FloorThickness), new Vector2(posX, CeilingHeight + CeilingThickness));
-                sectionDoc.Entities.Add(verticalWallLine);
+                double mp = (walls[i].P + walls[i + 1].P) / 2;
+                var room = crossed.FirstOrDefault(r => A0(r) <= mp && mp <= A1(r));
+                if (room == null) continue;
+                s.Txt(room.Name, (walls[i].B + walls[i + 1].A) / 2, ClearH - 28, 12, lTxt, TextAlignment.BottomCenter);
             }
 
-            return sectionDoc;
-        }
+            // 7. מידות אופקיות: עובי קירות + רוחב נקי של כל חלל, ומידה כוללת
+            var br = new List<double> { 0, Ltot };
+            foreach (var w in walls) { br.Add(w.A); br.Add(w.B); }
+            br = br.Distinct().OrderBy(v => v).ToList();
+            for (int i = 0; i < br.Count - 1; i++)
+                if (br[i + 1] - br[i] >= 8)
+                    s.DimH(br[i], br[i + 1], -120, ((int)Math.Round(br[i + 1] - br[i])).ToString(), lDim, lTxt);
+            s.DimH(0, Ltot, -175, (Ltot / K).ToString("0.00", CultureInfo.InvariantCulture), lDim, lTxt, 12);
 
-        // פונקציה שמציירת מפלסי אדמה מחוץ לבית (נותן תחושה של מגרש ולא בית באוויר)
-        private void DrawTopography(DxfDocument doc, double length)
-        {
-            // אדמה בצד שמאל (יורדת במדרגה)
-            doc.Entities.Add(new Line(new Vector2(-100, GroundLevel - 30), new Vector2(0, GroundLevel)));
-            doc.Entities.Add(new Line(new Vector2(0, GroundLevel), new Vector2(0, -FloorThickness))); // חיבור לבניין
+            // 8. מידות אנכיות ומפלסים
+            s.DimV(-330, 0, ClearH, "260", lDim, lTxt);
+            s.DimV(-330, ClearH, slabTop, "20", lDim, lTxt);
+            s.DimV(-330, slabTop, top, "60", lDim, lTxt);
+            double xl = -470;
+            s.LevelMark(xl, -FootDepth, DxfUtil.Lvl(-FootDepth / K), lDim, lTxt);
+            s.LevelMark(xl, -FloorAbove, DxfUtil.Lvl(-FloorAbove / K), lDim, lTxt);
+            s.LevelMark(xl, 0, DxfUtil.Lvl(0), lDim, lTxt);
+            s.LevelMark(xl, ClearH, DxfUtil.Lvl(ClearH / K), lDim, lTxt);
+            s.LevelMark(xl, slabTop, DxfUtil.Lvl(slabTop / K), lDim, lTxt);
+            s.LevelMark(xl, top, DxfUtil.Lvl(top / K), lDim, lTxt);
 
-            // אדמה בצד ימין (יורדת בשיפוע קל)
-            doc.Entities.Add(new Line(new Vector2(length, -FloorThickness), new Vector2(length, GroundLevel)));
-            doc.Entities.Add(new Line(new Vector2(length, GroundLevel), new Vector2(length + 100, GroundLevel - 20)));
-        }
-
-        // אלגוריתם מתמטי למציאת נקודת חיתוך בין שני קטעים (Line Segments) בדו-מימד
-        private bool TryGetIntersection(Vector2 p1, Vector2 p2, Vector2 p3, Vector2 p4, out Vector2 intersection)
-        {
-            intersection = new Vector2();
-            double denominator = (p1.X - p2.X) * (p3.Y - p4.Y) - (p1.Y - p2.Y) * (p3.X - p4.X);
-
-            // אם המכנה קרוב ל-0, הקווים מקבילים ולעולם לא יחתכו זה את זה
-            if (Math.Abs(denominator) < 0.001) return false;
-
-            double t = ((p1.X - p3.X) * (p3.Y - p4.Y) - (p1.Y - p3.Y) * (p3.X - p4.X)) / denominator;
-            double u = -((p1.X - p2.X) * (p1.Y - p3.Y) - (p1.Y - p2.Y) * (p1.X - p3.X)) / denominator;
-
-            // אם t ו-u נמצאים בין 0 ל-1, קיימת נקודת חיתוך ממשית על שני הקטעים
-            if (t >= 0 && t <= 1 && u >= 0 && u <= 1)
-            {
-                intersection = new Vector2(p1.X + t * (p2.X - p1.X), p1.Y + t * (p2.Y - p1.Y));
-                return true;
-            }
-
-            return false;
+            // 9. כותרת
+            s.Txt($"חתך {label}   1:50", Ltot / 2, -250, 28, lTxt, TextAlignment.BottomCenter);
+            s.Txt(h ? "מבט לכיוון צפון" : "מבט לכיוון מזרח", Ltot / 2, -290, 14, lTxt, TextAlignment.BottomCenter);
+            return doc;
         }
     }
 }

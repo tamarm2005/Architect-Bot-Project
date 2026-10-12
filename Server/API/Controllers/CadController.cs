@@ -549,6 +549,17 @@ namespace CadProject.Controllers
             public List<ConfirmedRoomDto> Rooms { get; set; }
         }
 
+        // קריאת שדה מספרי לפי שם (אם אין שדה כזה ב-DTO מקבלים null ולא שגיאת קומפילציה)
+        private static double? Num(object obj, string prop)
+        {
+            if (obj == null) return null;
+            var p = obj.GetType().GetProperty(prop);
+            if (p == null) return null;
+            var v = p.GetValue(obj);
+            if (v == null) return null;
+            try { return Convert.ToDouble(v); } catch { return null; }
+        }
+
         [HttpPost("export-confirmed-layout-zip")]
         public IActionResult ExportConfirmedLayoutZip([FromBody] ConfirmedLayoutRequest request)
         {
@@ -640,7 +651,41 @@ namespace CadProject.Controllers
                 }
 
                 string baseFurniturePath = Path.Combine(tempFolder, "1_Furniture_Plan.dxf");
+                BL.Algorithms.HebrewFontFixer.ApplyToDoc(doc);
                 doc.Save(baseFurniturePath);
+
+                // ===== מודל נקי לחזיתות ולחתכים (מטרים) =====
+                var geo = new BL.Algorithms.BuildingGeometry();
+                foreach (var p in request.BuildingOuterWall) geo.Outline.Add(new netDxf.Vector2(p.X, p.Y));
+                foreach (var room in request.Rooms)
+                {
+                    var ri = new BL.Algorithms.RoomInfo { Name = room.Name ?? "", X = room.PositionX, Y = room.PositionY, W = room.Width, L = room.Length };
+                    foreach (var f in room.Furniture ?? new List<ConfirmedFurnitureDto>())
+                    {
+                        double fw = f.Width, fln = f.Length;
+                        double rot = Math.Abs(f.Rotation % 180);
+                        if (rot > 45 && rot < 135) { double t = fw; fw = fln; fln = t; }
+                        double fx = room.PositionX + f.X, fy = room.PositionY + f.Y;
+                        ri.Furniture.Add(new BL.Algorithms.FurnInfo { Name = f.Name ?? "", X0 = fx, Y0 = fy, X1 = fx + fw, Y1 = fy + fln });
+                    }
+                    geo.Rooms.Add(ri);
+
+                    void AddOpening(string px, string py, string psize, bool isDoor, double defW)
+                    {
+                        double? ox = Num(room, px), oy = Num(room, py), os = Num(room, psize);
+                        if (!ox.HasValue || !oy.HasValue || (ox.Value == 0 && oy.Value == 0)) return;
+                        double ax = ox.Value, ay = oy.Value;
+                        bool absolute = ax >= room.PositionX - 0.6 && ax <= room.PositionX + room.Width + 0.6 &&
+                                        ay >= room.PositionY - 0.6 && ay <= room.PositionY + room.Length + 0.6;
+                        if (!absolute) { ax += room.PositionX; ay += room.PositionY; }
+                        double w = (os.HasValue && os.Value > 0) ? os.Value : defW;
+                        if (w > 5) w /= 100.0; // אם הגיע בס"מ
+                        geo.Openings.Add(new BL.Algorithms.OpeningInfo { X = ax, Y = ay, Width = w, IsDoor = isDoor, RoomName = room.Name ?? "" });
+                    }
+                    AddOpening("DoorX", "DoorY", "DoorSize", true, 0.9);
+                    AddOpening("WindowX", "WindowY", "WindowSize", false, 1.2);
+                }
+                Console.WriteLine($"ℹ️ חזיתות/חתכים: {geo.Rooms.Count} חדרים, {geo.Openings.Count} פתחים");
 
                 try
                 {
@@ -653,7 +698,7 @@ namespace CadProject.Controllers
                 try
                 {
                     var elevService = new BL.Algorithms.ElevationService();
-                    string elevPath = elevService.GenerateElevationsPlan(baseFurniturePath);
+                    string elevPath = elevService.GenerateElevationsPlan(geo);
                     if (!elevPath.StartsWith("Error")) System.IO.File.Copy(elevPath, Path.Combine(tempFolder, "3_Elevations_Plan.dxf"));
                 }
                 catch (Exception ex) { Console.WriteLine($"⚠️ שגיאה ביצירת חזיתות (מדלגים): {ex.Message}"); }
@@ -661,8 +706,10 @@ namespace CadProject.Controllers
                 try
                 {
                     var secGenerator = new BL.Algorithms.SectionGenerator();
-                    var sections = secGenerator.GenerateAutoSections(doc);
+                    var sections = secGenerator.GenerateAutoSections(geo);
                     if (sections.ContainsKey("Section_AA")) sections["Section_AA"].Save(Path.Combine(tempFolder, "4_Section_AA.dxf"));
+                    if (sections.ContainsKey("Section_BB")) sections["Section_BB"].Save(Path.Combine(tempFolder, "4_Section_BB.dxf"));
+                
                 }
                 catch (Exception ex) { Console.WriteLine($"⚠️ שגיאה ביצירת חתך (מדלגים): {ex.Message}"); }
 
@@ -1218,6 +1265,7 @@ namespace CadProject.Controllers
                 }
 
                 string baseFurniturePath = Path.Combine(tempFolder, "1_Furniture_Plan.dxf");
+                BL.Algorithms.HebrewFontFixer.ApplyToDoc(doc);
                 doc.Save(baseFurniturePath);
 
                 var dimService = new BL.Algorithms.DimensionsService();
@@ -1237,7 +1285,13 @@ namespace CadProject.Controllers
                 string roofPath = roofService.GenerateRoofPlanFromWalls(exteriorWalls, roofSpec);
                 if (!roofPath.StartsWith("Error")) System.IO.File.Copy(roofPath, Path.Combine(tempFolder, "5_Roof_Plan.dxf"));
 
+                foreach (var dxfFile in Directory.GetFiles(tempFolder, "*.dxf"))
+                {
+                    try { BL.Algorithms.HebrewFontFixer.Apply(dxfFile); }
+                    catch (Exception ex) { Console.WriteLine($"⚠️ תיקון פונט נכשל ב-{Path.GetFileName(dxfFile)}: {ex.Message}"); }
+                }
                 ZipFile.CreateFromDirectory(tempFolder, zipFilePath);
+                
                 var fileBytes = System.IO.File.ReadAllBytes(zipFilePath);
                 return File(fileBytes, "application/zip", "Full_Architectural_Project.zip");
             }
