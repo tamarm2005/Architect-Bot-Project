@@ -436,5 +436,328 @@ namespace BL.Algorithms
             doc.Entities.Add(titleText);
             doc.Entities.Add(scaleText);
         }
+        // =====================================================================
+        //  תוכנית גגות מלאה - לפי BuildingGeometry (מטרים), מצויר בס"מ בקנה מידה 1:100
+        // =====================================================================
+        public string GenerateRoofPlanFromGeometry(BuildingGeometry g, RoofSpecification spec)
+        {
+            if (g == null || g.Outline == null || g.Outline.Count < 3)
+                return "Error: לא התקבל מתאר בניין.";
+
+            const double K = DxfUtil.K;
+            double wallT = (spec != null && spec.WallThickness > 0) ? spec.WallThickness : 20.0;
+            if (wallT < 5.0) wallT *= 100;                       // אם הגיע במטרים
+            double slope = (spec != null && spec.SlopePercent > 0) ? spec.SlopePercent : 1.5;
+            string slopeTxt = slope.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+
+            var doc = new DxfDocument();
+            var s = new Sheet(doc, 0, 0);
+
+            // ---------- שכבות ----------
+            var lOut = DxfUtil.Lay(doc, "A-ROOF-OUT", 7, Lineweight.W50);
+            var lPara = DxfUtil.Lay(doc, "A-ROOF-PARA", 1, Lineweight.W35);
+            var lHatch = DxfUtil.Lay(doc, "A-ROOF-HATCH", 8);
+            var lBelow = DxfUtil.Lay(doc, "A-ROOF-BELOW", 8);
+            lBelow.Linetype = Linetype.Dashed;
+            var lRidge = DxfUtil.Lay(doc, "A-ROOF-RIDGE", 6);
+            lRidge.Linetype = Linetype.Dashed;
+            var lDrain = DxfUtil.Lay(doc, "A-ROOF-DRAIN", 3, Lineweight.W35);
+            var lSlope = DxfUtil.Lay(doc, "A-ROOF-SLOPE", 4);
+            var lEq = DxfUtil.Lay(doc, "A-ROOF-EQUIP", 5);
+            var lDim = DxfUtil.Lay(doc, "A-ROOF-DIM", 2);
+            var lTxt = DxfUtil.Lay(doc, "A-TEXT", 7);
+
+            // ---------- מתאר בס"מ (יחסית לפינה השמאלית-תחתונה) ----------
+            double ox = g.MinX, oy = g.MinY;
+            var P = g.Outline.Select(p => new Vector2((p.X - ox) * K, (p.Y - oy) * K)).ToList();
+            double W = (g.MaxX - g.MinX) * K, H = (g.MaxY - g.MinY) * K;
+
+            var inner = RoofInset(P, wallT);
+            if (inner == null || inner.Count < 3) return "Error: לא ניתן לחשב פרפט פנימי.";
+
+            // הגג נקי מחדרים: לא מציירים קירות פנימיים ולא שמות חדרים
+
+            // ---------- 2. פרפט: קו חיצוני + קו פנימי + קווי פוצ'ה ----------
+            for (int i = 0; i < P.Count; i++)
+            {
+                var a = P[i]; var b = P[(i + 1) % P.Count];
+                s.Ln(a.X, a.Y, b.X, b.Y, lOut);
+                var c = inner[i]; var d = inner[(i + 1) % inner.Count];
+                s.Ln(c.X, c.Y, d.X, d.Y, lPara);
+
+                // פוצ'ה רק לקירות אנכיים/אופקיים (בין הקו החיצוני לפנימי)
+                if (Math.Abs(a.Y - b.Y) < 0.01)
+                    RoofHatch(s, Math.Min(a.X, b.X), Math.Min(a.Y, c.Y), Math.Max(a.X, b.X), Math.Max(a.Y, c.Y), 12, lHatch);
+                else if (Math.Abs(a.X - b.X) < 0.01)
+                    RoofHatch(s, Math.Min(a.X, c.X), Math.Min(a.Y, b.Y), Math.Max(a.X, c.X), Math.Max(a.Y, b.Y), 12, lHatch);
+            }
+
+            // ---------- 3. ניקוזים ----------
+            double ix0 = inner.Min(p => p.X), ix1 = inner.Max(p => p.X);
+            double iy0 = inner.Min(p => p.Y), iy1 = inner.Max(p => p.Y);
+            double areaM2 = Math.Abs(RoofArea(inner)) / 10000.0;
+            int n = (int)Math.Ceiling(areaM2 / 100.0);
+            if (n < 2) n = 2; if (n > 4) n = 4;
+            var centroid = new Vector2(inner.Average(p => p.X), inner.Average(p => p.Y));
+
+            bool longX = (ix1 - ix0) >= (iy1 - iy0);
+            double[] fracs = n == 2 ? new[] { 0.25, 0.75 } : n == 3 ? new[] { 0.2, 0.5, 0.8 } : new[] { 0.25, 0.75, 0.25, 0.75 };
+            var drains = new List<Vector2>();
+            for (int i = 0; i < n; i++)
+            {
+                bool far = (n == 4 && i >= 2);     // 4 ניקוזים: שניים בכל צד ארוך
+                double along = fracs[i];
+                double px, py;
+                if (longX)
+                {
+                    px = ix0 + (ix1 - ix0) * along;
+                    py = far ? iy1 - 55 : iy0 + 55;
+                    if (n == 3 && i == 1) py = iy1 - 55;
+                }
+                else
+                {
+                    py = iy0 + (iy1 - iy0) * along;
+                    px = far ? ix1 - 55 : ix0 + 55;
+                    if (n == 3 && i == 1) px = ix1 - 55;
+                }
+                var pt = new Vector2(px, py);
+                // לא בפינות/מחוץ לגג: מזיזים לכיוון מרכז הגג עד שנכנסים
+                for (int k = 0; k < 40 && !RoofIn(inner, pt.X, pt.Y); k++)
+                {
+                    var v = centroid - pt; double l = Math.Sqrt(v.X * v.X + v.Y * v.Y); if (l < 1) break;
+                    pt = new Vector2(pt.X + v.X / l * 10, pt.Y + v.Y / l * 10);
+                }
+                // לא מעל פתח: אם יש פתח במרחק פחות מ-70 ס"מ מזיזים 100 ס"מ לאורך הקיר
+                foreach (var o in g.Openings)
+                {
+                    double dx = (o.X - ox) * K - pt.X, dy = (o.Y - oy) * K - pt.Y;
+                    if (Math.Sqrt(dx * dx + dy * dy) < 70)
+                    {
+                        if (longX) pt = new Vector2(pt.X + 100, pt.Y); else pt = new Vector2(pt.X, pt.Y + 100);
+                        break;
+                    }
+                }
+                if (RoofIn(inner, pt.X, pt.Y)) drains.Add(pt);
+            }
+
+            foreach (var d in drains)
+            {
+                RoofCircle(s, d.X, d.Y, 10, lDrain);
+                RoofCircle(s, d.X, d.Y, 5, lDrain);
+                s.Ln(d.X - 14, d.Y, d.X + 14, d.Y, lDrain);
+                s.Ln(d.X, d.Y - 14, d.X, d.Y + 14, lDrain);
+                var dir = Unit(centroid.X - d.X, centroid.Y - d.Y);
+                s.Txt("ניקוז 4\"", d.X + dir.X * 45 + 12, d.Y + dir.Y * 45 + 12, 12, lTxt);
+
+                // פתח גלישה בפרפט הקרוב: מלבן קטן בעובי הקיר, 5 ס"מ מעל פני הגג
+                RoofOverflow(s, P, inner, d, wallT, lDrain);
+
+                // חצי שיפוע לכיוון הניקוז
+                var side = new Vector2(-dir.Y, dir.X);
+                foreach (var lat in new[] { 0.0, -180.0, 180.0 })
+                {
+                    double sx = d.X + dir.X * 230 + side.X * lat, sy = d.Y + dir.Y * 230 + side.Y * lat;
+                    if (!RoofIn(inner, sx, sy)) continue;
+                    RoofArrow(s, sx, sy, d.X + side.X * lat * 0.25 + dir.X * 22, d.Y + side.Y * lat * 0.25 + dir.Y * 22, lSlope);
+                    if (lat == 0.0) s.Txt("שיפוע " + slopeTxt + "%", sx + 8, sy + 8, 11, lTxt);
+                }
+            }
+
+            // קו רכס בין ניקוזים סמוכים באותה שורה/עמודה
+            for (int i = 0; i + 1 < drains.Count; i++)
+            {
+                var a = drains[i]; var b = drains[i + 1];
+                if (longX && Math.Abs(a.Y - b.Y) < 1)
+                {
+                    double mx = (a.X + b.X) / 2;
+                    s.Ln(mx, iy0 + 20, mx, iy1 - 20, lRidge);
+                    s.Txt("קו רכס", mx + 6, (iy0 + iy1) / 2, 11, lTxt);
+                }
+                else if (!longX && Math.Abs(a.X - b.X) < 1)
+                {
+                    double my = (a.Y + b.Y) / 2;
+                    s.Ln(ix0 + 20, my, ix1 - 20, my, lRidge);
+                    s.Txt("קו רכס", (ix0 + ix1) / 2, my + 6, 11, lTxt);
+                }
+            }
+
+            // ---------- 4. אלמנטים על הגג ----------
+            // דוד שמש וקולטים: מלבן 120x200 בפינה הרחוקה מהניקוזים (אם נכנס בגג)
+            double sw = 120, sh = 200;
+            double sxr = ix1 - 90 - sw, syr = iy1 - 90 - sh;
+            if (RoofIn(inner, sxr, syr) && RoofIn(inner, sxr + sw, syr + sh) && RoofIn(inner, sxr, syr + sh) && RoofIn(inner, sxr + sw, syr))
+            {
+                s.Rect(sxr, syr, sxr + sw, syr + sh, lEq);
+                s.Ln(sxr, syr, sxr + sw, syr + sh, lEq);
+                s.Ln(sxr, syr + sh, sxr + sw, syr, lEq);
+                s.Txt("דוד שמש וקולטים", sxr + sw / 2, syr - 18, 11, lTxt, TextAlignment.BottomCenter);
+            }
+            // שני צינורות אוורור
+            foreach (var vp in new[] { new Vector2(ix0 + 90, iy1 - 90), new Vector2(ix0 + 140, iy1 - 90) })
+                if (RoofIn(inner, vp.X, vp.Y)) RoofCircle(s, vp.X, vp.Y, 5, lEq);
+            if (RoofIn(inner, ix0 + 90, iy1 - 90))
+                s.Txt("צינורות אוורור", ix0 + 90, iy1 - 115, 10, lTxt);
+
+            // גישה לגג: חדר מדרגות אם קיים, אחרת הערת סולם
+            var stairs = g.Rooms.FirstOrDefault(r => (r.Name ?? "").Contains("מדרגות"));
+            if (stairs != null)
+            {
+                double cx = (stairs.X + stairs.W / 2 - ox) * K, cy = (stairs.Y + stairs.L / 2 - oy) * K;
+                s.Rect(cx - 45, cy - 30, cx + 45, cy + 30, lEq);
+                s.Txt("פתח יציאה לגג", cx, cy + 40, 11, lTxt, TextAlignment.BottomCenter);
+            }
+            else
+            {
+                s.Txt("גישה לגג: סולם", ix0 + 40, iy0 + 120, 12, lTxt);
+            }
+
+            // ---------- 5. מידות ----------
+            s.DimH(0, W, -90, ((int)Math.Round(W)).ToString(), lDim, lTxt, 14);
+            s.DimV(-90, 0, H, ((int)Math.Round(H)).ToString(), lDim, lTxt, 14);
+            s.DimH(ix0, ix1, H + 70, ((int)Math.Round(ix1 - ix0)).ToString(), lDim, lTxt, 12);
+            s.Txt("עובי פרפט " + (int)wallT, W + 30, H / 2, 11, lTxt);
+            s.Ln(W + 25, H / 2 - 4, W - 2, Math.Min(H / 2, H / 2) + 0, lDim);
+
+            // ---------- 6. כותרת, חץ צפון, מקרא והערות ----------
+            double ty = H + 220;
+            s.Txt("תוכנית גגות 1:100", W / 2, ty, 35, lTxt, TextAlignment.BottomCenter);
+            s.Txt("מידות בס\"מ, מפלסים במטרים", W / 2, ty - 40, 14, lTxt, TextAlignment.BottomCenter);
+
+            // חץ צפון
+            double nx = W + 160, ny = H + 80;
+            RoofCircle(s, nx, ny, 35, lOut);
+            s.Ln(nx, ny - 35, nx, ny + 35, lOut);
+            s.Ln(nx, ny + 35, nx - 12, ny + 8, lOut);
+            s.Ln(nx, ny + 35, nx + 12, ny + 8, lOut);
+            s.Txt("N", nx, ny + 45, 18, lTxt, TextAlignment.BottomCenter);
+
+            // מקרא ומפלסים
+            double lx = 0, ly = -230;
+            s.Txt("מקרא והערות:", lx, ly, 14, lTxt);
+            string[] notes =
+            {
+                "שיפוע " + slopeTxt + "% לכיוון הניקוזים, קו רכס בין ניקוזים",
+                "ניקוז 4\" לכל כ-100 מ\"ר: " + drains.Count + " ניקוזים, פתח גלישה מעל כל ניקוז (5 ס\"מ מעל פני הגג)",
+                "פרפט בטון " + (int)wallT + " ס\"מ, גובה " + (int)(ParapetHcm()) + " ס\"מ",
+                "איטום ביטומני + שכבת הגנה, כיפוף איטום 30 ס\"מ על הפרפט",
+                "מפלסים: תחתית תקרה +2.60, פני תקרה +2.80, ראש פרפט +3.40",
+                "שטח גג: " + areaM2.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + " מ\"ר"
+            };
+            for (int i = 0; i < notes.Length; i++)
+                s.Txt(notes[i], lx, ly - 24 * (i + 1), 11, lTxt);
+
+            string outputPath = Path.Combine(Path.GetTempPath(), $"Roof_Plan_{Guid.NewGuid()}.dxf");
+            HebrewFontFixer.ApplyToDoc(doc);
+            doc.Save(outputPath);
+            return outputPath;
+        }
+
+        private static double ParapetHcm() { return 60.0; }   // כמו ParapetH בחזיתות ובחתכים
+
+        // ----- עזרים לגג -----
+        private static Vector2 Unit(double x, double y)
+        {
+            double l = Math.Sqrt(x * x + y * y);
+            return l < 1e-9 ? new Vector2(0, 1) : new Vector2(x / l, y / l);
+        }
+
+        private static double RoofArea(List<Vector2> p)
+        {
+            double a = 0;
+            for (int i = 0; i < p.Count; i++) { var u = p[i]; var v = p[(i + 1) % p.Count]; a += u.X * v.Y - v.X * u.Y; }
+            return a / 2.0;
+        }
+
+        private static bool RoofIn(List<Vector2> p, double x, double y)
+        {
+            bool inside = false;
+            for (int i = 0, j = p.Count - 1; i < p.Count; j = i++)
+                if ((p[i].Y > y) != (p[j].Y > y) &&
+                    x < (p[j].X - p[i].X) * (y - p[i].Y) / (p[j].Y - p[i].Y + 1e-12) + p[i].X)
+                    inside = !inside;
+            return inside;
+        }
+
+        // היסט פנימה של מצולע בעובי t (חיתוך קווים סמוכים)
+        private static List<Vector2> RoofInset(List<Vector2> p, double t)
+        {
+            int n = p.Count;
+            double sign = RoofArea(p) >= 0 ? 1 : -1;      // CCW => הפנים משמאל
+            var ao = new Vector2[n]; var bo = new Vector2[n];
+            for (int i = 0; i < n; i++)
+            {
+                var a = p[i]; var b = p[(i + 1) % n];
+                var d = Unit(b.X - a.X, b.Y - a.Y);
+                var nrm = new Vector2(-d.Y * sign, d.X * sign);
+                ao[i] = new Vector2(a.X + nrm.X * t, a.Y + nrm.Y * t);
+                bo[i] = new Vector2(b.X + nrm.X * t, b.Y + nrm.Y * t);
+            }
+            var res = new List<Vector2>();
+            for (int i = 0; i < n; i++)
+            {
+                int pr = (i - 1 + n) % n;
+                double x1 = ao[pr].X, y1 = ao[pr].Y, x2 = bo[pr].X, y2 = bo[pr].Y;
+                double x3 = ao[i].X, y3 = ao[i].Y, x4 = bo[i].X, y4 = bo[i].Y;
+                double den = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
+                if (Math.Abs(den) < 1e-9) { res.Add(ao[i]); continue; }
+                double tt = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / den;
+                res.Add(new Vector2(x1 + tt * (x2 - x1), y1 + tt * (y2 - y1)));
+            }
+            return res;
+        }
+
+        // פוצ'ה אלכסוני עם יישור גלובלי (כדי שהפינות יתחברו יפה)
+        private static void RoofHatch(Sheet s, double x0, double y0, double x1, double y1, double step, Layer l)
+        {
+            double c = Math.Ceiling((x0 + y0) / step) * step;
+            for (; c < x1 + y1; c += step)
+            {
+                double yLo = Math.Max(y0, c - x1), yHi = Math.Min(y1, c - x0);
+                if (yHi - yLo > 0.5) s.Ln(c - yLo, yLo, c - yHi, yHi, l);
+            }
+        }
+
+        private static void RoofCircle(Sheet s, double x, double y, double r, Layer l)
+        {
+            s.Doc.Entities.Add(new Circle(new Vector2(s.OX + x, s.OY + y), r) { Layer = l });
+        }
+
+        private static void RoofArrow(Sheet s, double x1, double y1, double x2, double y2, Layer l)
+        {
+            s.Ln(x1, y1, x2, y2, l);
+            var d = Unit(x2 - x1, y2 - y1);
+            var nrm = new Vector2(-d.Y, d.X);
+            s.Ln(x2, y2, x2 - d.X * 18 + nrm.X * 6, y2 - d.Y * 18 + nrm.Y * 6, l);
+            s.Ln(x2, y2, x2 - d.X * 18 - nrm.X * 6, y2 - d.Y * 18 - nrm.Y * 6, l);
+        }
+
+        // פתח גלישה: סימון בעובי הפרפט ליד הניקוז
+        private static void RoofOverflow(Sheet s, List<Vector2> outer, List<Vector2> inner, Vector2 d, double wallT, Layer l)
+        {
+            double best = double.MaxValue; int bi = 0; Vector2 foot = d;
+            for (int i = 0; i < inner.Count; i++)
+            {
+                var a = inner[i]; var b = inner[(i + 1) % inner.Count];
+                double dx = b.X - a.X, dy = b.Y - a.Y, l2 = dx * dx + dy * dy;
+                if (l2 < 1e-9) continue;
+                double t = Math.Max(0, Math.Min(1, ((d.X - a.X) * dx + (d.Y - a.Y) * dy) / l2));
+                var f = new Vector2(a.X + t * dx, a.Y + t * dy);
+                double dist = Math.Sqrt((d.X - f.X) * (d.X - f.X) + (d.Y - f.Y) * (d.Y - f.Y));
+                if (dist < best) { best = dist; bi = i; foot = f; }
+            }
+            var e = Unit(inner[(bi + 1) % inner.Count].X - inner[bi].X, inner[(bi + 1) % inner.Count].Y - inner[bi].Y);
+            var o = outer[bi]; var q = outer[(bi + 1) % outer.Count];
+            var nOut = new Vector2(-e.Y, e.X);
+            // כיוון החוצה = לכיוון הקו החיצוני
+            if ((o.X - foot.X) * nOut.X + (o.Y - foot.Y) * nOut.Y < 0) nOut = new Vector2(-nOut.X, -nOut.Y);
+            double h = 15;
+            var p1 = new Vector2(foot.X - e.X * h, foot.Y - e.Y * h);
+            var p2 = new Vector2(foot.X + e.X * h, foot.Y + e.Y * h);
+            var p3 = new Vector2(p2.X + nOut.X * wallT, p2.Y + nOut.Y * wallT);
+            var p4 = new Vector2(p1.X + nOut.X * wallT, p1.Y + nOut.Y * wallT);
+            s.Ln(p1.X, p1.Y, p4.X, p4.Y, l); s.Ln(p2.X, p2.Y, p3.X, p3.Y, l);
+            s.Ln(p4.X, p4.Y, p3.X, p3.Y, l);
+            s.Txt("פתח גלישה", p3.X + nOut.X * 8, p3.Y + nOut.Y * 8, 10, l);
+        }
     }
 }

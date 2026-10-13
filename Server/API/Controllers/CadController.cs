@@ -690,8 +690,18 @@ namespace CadProject.Controllers
                 try
                 {
                     var dimService = new BL.Algorithms.DimensionsService();
-                    string dimPath = dimService.GenerateDimensionsPlan(baseFurniturePath);
-                    if (!dimPath.StartsWith("Error")) System.IO.File.Copy(dimPath, Path.Combine(tempFolder, "2_Dimensions_Plan.dxf"));
+                    string dimPath = dimService.GenerateDimensionsPlan(geo);
+                    if (!dimPath.StartsWith("Error"))
+                    {
+                        try
+                        {
+                            var dimDoc = netDxf.DxfDocument.Load(dimPath);
+                            dimService.AddInteriorDimensions(dimDoc, geo);   // שרטוט מידות פנימיות מעל התוכנית
+                            dimDoc.Save(dimPath);
+                        }
+                        catch (Exception exI) { Console.WriteLine($"⚠️ מידות פנימיות נכשלו (מדלגים): {exI.Message}"); }
+                        System.IO.File.Copy(dimPath, Path.Combine(tempFolder, "2_Dimensions_Plan.dxf"));
+                    }
                 }
                 catch (Exception ex) { Console.WriteLine($"⚠️ שגיאה ביצירת תוכנית מידות (מדלגים): {ex.Message}"); }
 
@@ -717,7 +727,7 @@ namespace CadProject.Controllers
                 {
                     var roofService = new BL.Algorithms.RoofService();
                     var roofSpec = new BL.Algorithms.RoofService.RoofSpecification { RoofType = "parapet", SlopePercent = 1.5, WallThickness = 20.0 };
-                    string roofPath = roofService.GenerateRoofPlanFromWalls(exteriorWalls, roofSpec);
+                    string roofPath = roofService.GenerateRoofPlanFromGeometry(geo, roofSpec);
                     if (!roofPath.StartsWith("Error")) System.IO.File.Copy(roofPath, Path.Combine(tempFolder, "5_Roof_Plan.dxf"));
                 }
                 catch (Exception ex) { Console.WriteLine($"⚠️ שגיאה ביצירת גג (מדלגים): {ex.Message}"); }
