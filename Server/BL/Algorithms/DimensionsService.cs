@@ -55,10 +55,9 @@ namespace BL.Algorithms
             var ys = new List<double> { g.MinY, g.MaxY };
             foreach (var r in g.Rooms)
             {
-                bool eL = IsExt(r.X, r.Y + r.L / 2, edges), eR = IsExt(r.X + r.W, r.Y + r.L / 2, edges);
-                bool eB = IsExt(r.X + r.W / 2, r.Y, edges), eT = IsExt(r.X + r.W / 2, r.Y + r.L, edges);
-                double x0 = r.X + (eL ? 0 : 0.05), x1 = r.X + r.W - (eR ? 0 : 0.05);
-                double y0 = r.Y + (eB ? 0 : 0.05), y1 = r.Y + r.L - (eT ? 0 : 0.05);
+                // המלבן של החדר הוא כבר פנים הקירות: מחיצה = 10 ס"מ בין שני חדרים, קיר חיצוני = 20 ס"מ
+                double x0 = r.X, x1 = r.X + r.W;
+                double y0 = r.Y, y1 = r.Y + r.L;
 
                 WallLine(s, x0, y0, x1, y0, lInt, g.Openings);
                 WallLine(s, x1, y0, x1, y1, lInt, g.Openings);
@@ -155,9 +154,13 @@ namespace BL.Algorithms
             else
             {
                 horiz = g.Rooms.Any(r => (Math.Abs(o.Y - r.Y) < 0.25 || Math.Abs(o.Y - (r.Y + r.L)) < 0.25) && o.X > r.X && o.X < r.X + r.W);
-                nx = horiz ? 0 : 1; ny = horiz ? 1 : 0;
                 thick = 0.1;
-                sx = o.X - nx * 0.05; sy = o.Y - ny * 0.05;
+                // המחיצה (10 ס"מ) יושבת בין שני החדרים: בודקים לאיזה כיוון היא ממשיכה מקצה החדר של הפתח
+                double dir = 1;
+                bool plus = g.Rooms.Any(r => horiz ? Math.Abs(r.Y - (o.Y + 0.1)) < 0.04 : Math.Abs(r.X - (o.X + 0.1)) < 0.04);
+                bool minus = g.Rooms.Any(r => horiz ? Math.Abs(r.Y + r.L - (o.Y - 0.1)) < 0.04 : Math.Abs(r.X + r.W - (o.X - 0.1)) < 0.04);
+                if (!plus && minus) dir = -1;
+                nx = horiz ? 0 : dir; ny = horiz ? dir : 0;
             }
 
             double ux = horiz ? 1 : 0, uy = horiz ? 0 : 1, hw = o.Width / 2;
@@ -333,7 +336,7 @@ namespace BL.Algorithms
                 rMinX = Math.Min(rMinX, r.X); rMaxX = Math.Max(rMaxX, r.X + r.W);
                 rMinY = Math.Min(rMinY, r.Y); rMaxY = Math.Max(rMaxY, r.Y + r.L);
             }
-            const double HALF = 0.05;      // חצי עובי מחיצה פנימית (5 ס"מ מכל צד)
+            const double HALF = 0.0;      // חצי עובי מחיצה פנימית (5 ס"מ מכל צד)
             const double TOL = 0.03;
 
             // מלבן נקי (פנים קירות) לכל חדר
