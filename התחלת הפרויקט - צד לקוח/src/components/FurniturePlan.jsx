@@ -94,6 +94,15 @@ const FurniturePlan = ({ layoutData, onBack }) => {
                             Y: f.y,
                             Rotation: f.rotation
                         }))
+                    })),
+                    Openings: (layoutData.openings || []).map(o => ({
+                        RoomName: o.roomName ?? o.RoomName,
+                        Type: o.type ?? o.Type,
+                        X: o.x ?? o.X,
+                        Y: o.y ?? o.Y,
+                        Wall: o.wall ?? o.Wall,
+                        Size: o.size ?? o.Size,
+                        IsEntrance: !!(o.isEntrance ?? o.IsEntrance)
                     }))
                 })
             });
@@ -178,49 +187,59 @@ const FurniturePlan = ({ layoutData, onBack }) => {
                 }}>
                     {layoutData.buildingOuterWall && layoutData.buildingOuterWall.length >= 3 && (() => {
                         const EXT = 0.20;                                   // קיר חיצוני 20 ס"מ
-                        const wallThickness = Math.max(2, EXT * scale);
+                        const wallThickness = Math.max(3, EXT * scale);
                         const xs = layoutData.buildingOuterWall.map(p => p.x ?? p.X);
                         const ys = layoutData.buildingOuterWall.map(p => p.y ?? p.Y);
-                        const left = Math.min(...xs) * scale + offsetX;
-                        const top = Math.min(...ys) * scale + offsetY;
-                        const width = (Math.max(...xs) - Math.min(...xs)) * scale;
-                        const height = (Math.max(...ys) - Math.min(...ys)) * scale;
+                        const minXw = Math.min(...xs), maxXw = Math.max(...xs);
+                        const minYw = Math.min(...ys), maxYw = Math.max(...ys);
+                        const left = minXw * scale + offsetX;
+                        const top = minYw * scale + offsetY;
+                        const width = (maxXw - minXw) * scale;
+                        const height = (maxYw - minYw) * scale;
 
-                        // פתח בקיר החיצוני במקום דלת הכניסה
-                        const entrance = (layoutData.openings || []).find(o => o.isEntrance || o.IsEntrance);
-                        let gap = null;
-                        if (entrance) {
-                            const ew = entrance.wall || entrance.Wall;
-                            const ex = (entrance.x ?? entrance.X) * scale + offsetX;
-                            const ey = (entrance.y ?? entrance.Y) * scale + offsetY;
-                            const es = (entrance.size ?? entrance.Size ?? 0.9) * scale;
-                            if (ew === 'Left') gap = { left: left, top: ey - es / 2, width: wallThickness, height: es };
-                            else if (ew === 'Right') gap = { left: left + width - wallThickness, top: ey - es / 2, width: wallThickness, height: es };
-                            else if (ew === 'Bottom') gap = { left: ex - es / 2, top: top, width: es, height: wallThickness };
-                            else gap = { left: ex - es / 2, top: top + height - wallThickness, width: es, height: wallThickness };
-                        }
+                        // פתחים בקיר החיצוני: כל דלת שיושבת על קו המעטפת (כניסה, דלת למרפסת)
+                        const pad = 2;
+                        const gaps = (layoutData.openings || [])
+                            .filter(o => (o.type || o.Type) === 'Door')
+                            .map(o => {
+                                const w = o.wall || o.Wall;
+                                const ox = (o.x ?? o.X), oy = (o.y ?? o.Y);
+                                const s = (o.size ?? o.Size ?? 0.9) * scale;
+                                const px = ox * scale + offsetX, py = oy * scale + offsetY;
+                                if (w === 'Left' || w === 'Right') {
+                                    if (Math.abs(ox - minXw) < 0.35) return { left: left - pad, top: py - s / 2, width: wallThickness + 2 * pad, height: s };
+                                    if (Math.abs(ox - maxXw) < 0.35) return { left: left + width - wallThickness - pad, top: py - s / 2, width: wallThickness + 2 * pad, height: s };
+                                } else {
+                                    if (Math.abs(oy - minYw) < 0.35) return { left: px - s / 2, top: top - pad, width: s, height: wallThickness + 2 * pad };
+                                    if (Math.abs(oy - maxYw) < 0.35) return { left: px - s / 2, top: top + height - wallThickness - pad, width: s, height: wallThickness + 2 * pad };
+                                }
+                                return null;
+                            })
+                            .filter(Boolean);
 
                         return (
                             <>
+                                {/* קיר חיצוני: רצועה בהירה עם שני קווים דקים (שיראו את העובי) */}
                                 <div style={{
                                     position: 'absolute',
                                     left: `${left}px`, top: `${top}px`,
                                     width: `${width}px`, height: `${height}px`,
-                                    border: `${wallThickness}px solid #0f172a`,
+                                    border: `${wallThickness}px solid #cbd5e1`,
                                     boxSizing: 'border-box',
+                                    boxShadow: '0 0 0 1.5px #0f172a, inset 0 0 0 1.5px #0f172a',
                                     pointerEvents: 'none',
                                     zIndex: 0
                                 }} />
-                                {gap && (
-                                    <div style={{
+                                {gaps.map((g, i) => (
+                                    <div key={`gap${i}`} style={{
                                         position: 'absolute',
-                                        left: `${gap.left}px`, top: `${gap.top}px`,
-                                        width: `${gap.width}px`, height: `${gap.height}px`,
+                                        left: `${g.left}px`, top: `${g.top}px`,
+                                        width: `${g.width}px`, height: `${g.height}px`,
                                         background: '#f8fafc',
                                         pointerEvents: 'none',
                                         zIndex: 1
                                     }} />
-                                )}
+                                ))}
                             </>
                         );
                     })()}
@@ -239,12 +258,12 @@ const FurniturePlan = ({ layoutData, onBack }) => {
                                 boxLeft = ox; boxTop = oy - s / 2;
                                 wallLine = { x1: 0, y1: 0, x2: 0, y2: s };
                                 leafLine = { x1: 0, y1: 0, x2: s, y2: 0 };
-                                arcPath = `M 0 ${s} A ${s} ${s} 0 0 1 ${s} 0`;
+                                arcPath = `M 0 ${s} A ${s} ${s} 0 0 0 ${s} 0`;
                             } else if (wall === 'Right') {
                                 boxLeft = ox - s; boxTop = oy - s / 2;
                                 wallLine = { x1: s, y1: 0, x2: s, y2: s };
                                 leafLine = { x1: s, y1: 0, x2: 0, y2: 0 };
-                                arcPath = `M ${s} ${s} A ${s} ${s} 0 0 0 0 0`;
+                                arcPath = `M ${s} ${s} A ${s} ${s} 0 0 1 0 0`;
                             } else if (wall === 'Bottom') {
                                 boxLeft = ox - s / 2; boxTop = oy;
                                 wallLine = { x1: 0, y1: 0, x2: s, y2: 0 };
@@ -254,7 +273,7 @@ const FurniturePlan = ({ layoutData, onBack }) => {
                                 boxLeft = ox - s / 2; boxTop = oy - s;
                                 wallLine = { x1: 0, y1: s, x2: s, y2: s };
                                 leafLine = { x1: s, y1: s, x2: s, y2: 0 };
-                                arcPath = `M 0 ${s} A ${s} ${s} 0 0 0 ${s} 0`;
+                                arcPath = `M 0 ${s} A ${s} ${s} 0 0 1 ${s} 0`;
                             }
                             return (
                                 <svg key={`opening-${i}`} width={s} height={s} style={{ position: 'absolute', left: `${boxLeft}px`, top: `${boxTop}px`, zIndex: 5, overflow: 'visible' }}>
@@ -371,15 +390,64 @@ const FurniturePlan = ({ layoutData, onBack }) => {
                         const bottomWallSegs = wallSegments(roomLeft, roomLeft + roomW, gapsFor('Bottom')); // עולם Y קטן = חלק עליון בפיקסלים
                         const topWallSegs = wallSegments(roomLeft, roomLeft + roomW, gapsFor('Top'));       // עולם Y גדול = חלק תחתון בפיקסלים
                         const wallT = Math.max(1.5, 0.05 * scale);   // כל חדר מצייר חצי קיר (5 ס"מ), יחד 10 ס"מ
+
+                        const isBalcony = (room.name || '').includes('מרפסת');
+                        // איזה צדדים של המרפסת פונים החוצה (שם יש מעקה) ואיזה נוגע במעטפת הבניין
+                        const envPts = layoutData.buildingOuterWall || [];
+                        const envXs = envPts.map(p => p.x ?? p.X), envYs = envPts.map(p => p.y ?? p.Y);
+                        const eMinX = Math.min(...envXs), eMaxX = Math.max(...envXs);
+                        const eMinY = Math.min(...envYs), eMaxY = Math.max(...envYs);
+                        const rx0 = room.positionX, rx1 = room.positionX + room.width;
+                        const ry0 = room.positionY, ry1 = room.positionY + room.length;
+                        const T = 0.35;
+                        const railLeft = isBalcony && !(Math.abs(rx0 - eMaxX) < T);
+                        const railRight = isBalcony && !(Math.abs(rx1 - eMinX) < T);
+                        const railTop = isBalcony && !(Math.abs(ry0 - eMaxY) < T);
+                        const railBottom = isBalcony && !(Math.abs(ry1 - eMinY) < T);
+                        const railIn = Math.max(2.5, 0.05 * scale);
+                        const isCovered = isBalcony && (room.name || '').includes('מקורה');
+                        const colSize = Math.max(3, 0.2 * scale);
                         
                         return (
                             <div key={roomIdx} style={{ position: 'absolute', left: `${roomLeft}px`, top: `${roomTop}px`, width: `${roomW}px`, height: `${roomH}px` }}>
-                                <div style={{ position: 'absolute', inset: 0, background: isCorridor ? 'rgba(148,163,184,0.08)' : '#ffffff', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }} />
+                                <div style={{ position: 'absolute', inset: 0, background: isCovered ? 'repeating-linear-gradient(45deg, #ffffff, #ffffff 6px, #e2e8f0 6px, #e2e8f0 7px)' : isCorridor ? 'rgba(148,163,184,0.08)' : '#ffffff', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }} />
                                 <svg width={roomW} height={roomH} style={{ position: 'absolute', top: 0, left: 0, overflow: 'visible', pointerEvents: 'none' }}>
-                                    {!isCorridor && leftSegs.map(([s, e], i) => <line key={`l${i}`} x1={-wallT / 2} y1={s - roomTop} x2={-wallT / 2} y2={e - roomTop} stroke="#1e293b" strokeWidth={wallT} />)}
-                                    {!isCorridor && rightSegs.map(([s, e], i) => <line key={`r${i}`} x1={roomW + wallT / 2} y1={s - roomTop} x2={roomW + wallT / 2} y2={e - roomTop} stroke="#1e293b" strokeWidth={wallT} />)}
-                                    {!isCorridor && bottomWallSegs.map(([s, e], i) => <line key={`b${i}`} x1={s - roomLeft} y1={-wallT / 2} x2={e - roomLeft} y2={-wallT / 2} stroke="#1e293b" strokeWidth={wallT} />)}
-                                    {!isCorridor && topWallSegs.map(([s, e], i) => <line key={`t${i}`} x1={s - roomLeft} y1={roomH + wallT / 2} x2={e - roomLeft} y2={roomH + wallT / 2} stroke="#1e293b" strokeWidth={wallT} />)}
+                                    {!isCorridor && !isBalcony && leftSegs.map(([s, e], i) => (
+                                        <g key={`l${i}`}>
+                                            <line x1={-wallT / 2} y1={s - roomTop} x2={-wallT / 2} y2={e - roomTop} stroke="#cbd5e1" strokeWidth={wallT} />
+                                            <line x1={0} y1={s - roomTop} x2={0} y2={e - roomTop} stroke="#1e293b" strokeWidth={1.2} />
+                                        </g>
+                                    ))}
+                                    {!isCorridor && !isBalcony && rightSegs.map(([s, e], i) => (
+                                        <g key={`r${i}`}>
+                                            <line x1={roomW + wallT / 2} y1={s - roomTop} x2={roomW + wallT / 2} y2={e - roomTop} stroke="#cbd5e1" strokeWidth={wallT} />
+                                            <line x1={roomW} y1={s - roomTop} x2={roomW} y2={e - roomTop} stroke="#1e293b" strokeWidth={1.2} />
+                                        </g>
+                                    ))}
+                                    {!isCorridor && !isBalcony && bottomWallSegs.map(([s, e], i) => (
+                                        <g key={`b${i}`}>
+                                            <line x1={s - roomLeft} y1={-wallT / 2} x2={e - roomLeft} y2={-wallT / 2} stroke="#cbd5e1" strokeWidth={wallT} />
+                                            <line x1={s - roomLeft} y1={0} x2={e - roomLeft} y2={0} stroke="#1e293b" strokeWidth={1.2} />
+                                        </g>
+                                    ))}
+                                    {!isCorridor && !isBalcony && topWallSegs.map(([s, e], i) => (
+                                        <g key={`t${i}`}>
+                                            <line x1={s - roomLeft} y1={roomH + wallT / 2} x2={e - roomLeft} y2={roomH + wallT / 2} stroke="#cbd5e1" strokeWidth={wallT} />
+                                            <line x1={s - roomLeft} y1={roomH} x2={e - roomLeft} y2={roomH} stroke="#1e293b" strokeWidth={1.2} />
+                                        </g>
+                                    ))}
+
+                                    {/* מרפסת מקורה: עמודי 20x20 בפינות החיצוניות */}
+                                    {isCovered && [[0, 0], [1, 0], [0, 1], [1, 1]]
+                                        .filter(([a, b]) => !((a === 0 && !railLeft) || (a === 1 && !railRight) || (b === 0 && !railTop) || (b === 1 && !railBottom)))
+                                        .map(([a, b], k) => (
+                                            <rect key={`col${k}`} x={a ? roomW - colSize : 0} y={b ? roomH - colSize : 0} width={colSize} height={colSize} fill="#334155" />
+                                        ))}
+
+                                    {/* מרפסת: מעקה (שני קווים דקים) רק בצדדים שפונים החוצה */}                                    {railLeft && <g><line x1={0} y1={0} x2={0} y2={roomH} stroke="#0f172a" strokeWidth={2} /><line x1={railIn} y1={0} x2={railIn} y2={roomH} stroke="#64748b" strokeWidth={1} /></g>}
+                                    {railRight && <g><line x1={roomW} y1={0} x2={roomW} y2={roomH} stroke="#0f172a" strokeWidth={2} /><line x1={roomW - railIn} y1={0} x2={roomW - railIn} y2={roomH} stroke="#64748b" strokeWidth={1} /></g>}
+                                    {railTop && <g><line x1={0} y1={0} x2={roomW} y2={0} stroke="#0f172a" strokeWidth={2} /><line x1={0} y1={railIn} x2={roomW} y2={railIn} stroke="#64748b" strokeWidth={1} /></g>}
+                                    {railBottom && <g><line x1={0} y1={roomH} x2={roomW} y2={roomH} stroke="#0f172a" strokeWidth={2} /><line x1={0} y1={roomH - railIn} x2={roomW} y2={roomH - railIn} stroke="#64748b" strokeWidth={1} /></g>}
                                 </svg>
 
                                 <div style={{

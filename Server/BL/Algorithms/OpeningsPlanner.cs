@@ -6,6 +6,7 @@ using System.Linq;
 
 namespace BL.Algorithms
 {
+    //פתחים
     public class OpeningPlan
     {
         public string RoomName { get; set; } = "";
@@ -79,14 +80,20 @@ namespace BL.Algorithms
                 }
             }
 
-            // דלת כניסה חיצונית - לסלון, בקיר שנוגע במעטפת
+            // דלת כניסה חיצונית - לסלון, בקיר שנוגע במעטפת ואינו פונה למרפסת
             if (livingRoom != null)
             {
-                double entranceSize = 0.9; // 🌟 דלת כניסה תמיד 90 ס"מ
-                if (Math.Abs(livingRoom.PositionY - plotMinY) < Tolerance)
-                    openings.Add(new OpeningPlan { RoomName = livingRoom.Name, Type = "Door", X = livingRoom.PositionX + livingRoom.Width * 0.3, Y = livingRoom.PositionY, Wall = "Bottom", Size = Math.Min(entranceSize, livingRoom.Width * 0.4), IsEntrance = true });
-                else if (Math.Abs(livingRoom.PositionX - plotMinX) < Tolerance)
+                double entranceSize = 0.9; // דלת כניסה תמיד 90 ס"מ
+                bool BalconyOnWall(string wall) => rooms.Any(b => IsBalcony(b) && GetSharedWallMidpoint(livingRoom, b).Item1 == wall);
+
+                if (Math.Abs(livingRoom.PositionX - plotMinX) < Tolerance && !BalconyOnWall("Left"))
                     openings.Add(new OpeningPlan { RoomName = livingRoom.Name, Type = "Door", X = livingRoom.PositionX, Y = livingRoom.PositionY + livingRoom.Length * 0.3, Wall = "Left", Size = Math.Min(entranceSize, livingRoom.Length * 0.4), IsEntrance = true });
+                else if (Math.Abs(livingRoom.PositionY - plotMinY) < Tolerance && !BalconyOnWall("Bottom"))
+                    openings.Add(new OpeningPlan { RoomName = livingRoom.Name, Type = "Door", X = livingRoom.PositionX + livingRoom.Width * 0.3, Y = livingRoom.PositionY, Wall = "Bottom", Size = Math.Min(entranceSize, livingRoom.Width * 0.4), IsEntrance = true });
+                else if (Math.Abs((livingRoom.PositionX + livingRoom.Width) - plotMaxX) < Tolerance && !BalconyOnWall("Right"))
+                    openings.Add(new OpeningPlan { RoomName = livingRoom.Name, Type = "Door", X = livingRoom.PositionX + livingRoom.Width, Y = livingRoom.PositionY + livingRoom.Length * 0.3, Wall = "Right", Size = Math.Min(entranceSize, livingRoom.Length * 0.4), IsEntrance = true });
+                else if (Math.Abs((livingRoom.PositionY + livingRoom.Length) - plotMaxY) < Tolerance && !BalconyOnWall("Top"))
+                    openings.Add(new OpeningPlan { RoomName = livingRoom.Name, Type = "Door", X = livingRoom.PositionX + livingRoom.Width * 0.3, Y = livingRoom.PositionY + livingRoom.Length, Wall = "Top", Size = Math.Min(entranceSize, livingRoom.Width * 0.4), IsEntrance = true });
             }
 
             ResolveOverlaps(openings, rooms);

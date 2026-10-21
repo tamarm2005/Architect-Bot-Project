@@ -3,14 +3,11 @@ using CadApplication.Algorithms;
 using DAL;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Hosting;
 using Models;
 using netDxf;
 using netDxf.Entities;
-using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
-using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
@@ -73,8 +70,8 @@ namespace CadProject.Controllers
                 {
                     defaultRoom.walls = dxf.Entities.Lines.Select(l => new Wall
                     {
-                        StartPoint = new Models.Point3D(0, l.StartPoint.X, l.StartPoint.Y, 0 ),
-                        EndPoint = new Models.Point3D(0, l.EndPoint.X, l.EndPoint.Y, 0 ),
+                        StartPoint = new Models.Point3D(0, l.StartPoint.X, l.StartPoint.Y, 0),
+                        EndPoint = new Models.Point3D(0, l.EndPoint.X, l.EndPoint.Y, 0),
                         WallType = l.Layer.Name ?? "Exterior Wall",
                         Thickness = 20,
                         Material = defaultMaterial
@@ -96,8 +93,8 @@ namespace CadProject.Controllers
                             Width = 90,
                             Height = 210,
                             BottomHeight = layer.Contains("חלון") ? 100 : 0,
-                            StartPoint = new Models.Point3D(0, insert.Position.X, insert.Position.Y, 0 ),
-                            EndPoint = new Models.Point3D(0, insert.Position.X + 10, insert.Position.Y, 0 ),
+                            StartPoint = new Models.Point3D(0, insert.Position.X, insert.Position.Y, 0),
+                            EndPoint = new Models.Point3D(0, insert.Position.X + 10, insert.Position.Y, 0),
                             Materials = new List<Material> { defaultMaterial }
                         });
                     }
@@ -106,7 +103,7 @@ namespace CadProject.Controllers
                         defaultRoom.furniture.Add(new Furniture
                         {
                             ItemName = blockName,
-                            Location = new Models.Point3D(0, insert.Position.X, insert.Position.Y, 0 ),
+                            Location = new Models.Point3D(0, insert.Position.X, insert.Position.Y, 0),
                             Width = 60,
                             Height = 75,
                             Length = 120,
@@ -269,9 +266,9 @@ namespace CadProject.Controllers
                     {
                         Id = index,
                         LayerName = p.Layer?.Name ?? "No Layer",
-                        Area = Math.Round(geometryService.CalculateArea(p.Vertexes.Select(v => new Models.Point3D(0, v.Position.X, v.Position.Y, 0 )).ToList()), 2),
-                        Points = p.Vertexes.Select(v => new Models.Point3D(0, v.Position.X, v.Position.Y, 0 )).ToList(),
-                        Centroid = geometryService.GetCentroid(p.Vertexes.Select(v => new Models.Point3D(0, v.Position.X, v.Position.Y, 0 )).ToList())
+                        Area = Math.Round(geometryService.CalculateArea(p.Vertexes.Select(v => new Models.Point3D(0, v.Position.X, v.Position.Y, 0)).ToList()), 2),
+                        Points = p.Vertexes.Select(v => new Models.Point3D(0, v.Position.X, v.Position.Y, 0)).ToList(),
+                        Centroid = geometryService.GetCentroid(p.Vertexes.Select(v => new Models.Point3D(0, v.Position.X, v.Position.Y, 0)).ToList())
                     })
                     .OrderByDescending(c => c.Area)
                     .Take(1000)
@@ -543,10 +540,22 @@ namespace CadProject.Controllers
             public List<ConfirmedFurnitureDto> Furniture { get; set; } = new List<ConfirmedFurnitureDto>();
         }
 
+        public class ConfirmedOpeningDto
+        {
+            public string RoomName { get; set; }
+            public string Type { get; set; }
+            public double X { get; set; }
+            public double Y { get; set; }
+            public string Wall { get; set; }
+            public double Size { get; set; }
+            public bool IsEntrance { get; set; }
+        }
+
         public class ConfirmedLayoutRequest
         {
             public List<Point3D> BuildingOuterWall { get; set; }
             public List<ConfirmedRoomDto> Rooms { get; set; }
+            public List<ConfirmedOpeningDto> Openings { get; set; } = new List<ConfirmedOpeningDto>();
         }
 
         // קריאת שדה מספרי לפי שם (אם אין שדה כזה ב-DTO מקבלים null ולא שגיאת קומפילציה)
@@ -685,6 +694,19 @@ namespace CadProject.Controllers
                     AddOpening("DoorX", "DoorY", "DoorSize", true, 0.9);
                     AddOpening("WindowX", "WindowY", "WindowSize", false, 1.2);
                 }
+
+                foreach (var op in request.Openings ?? new List<ConfirmedOpeningDto>())
+                {
+                    geo.Openings.Add(new BL.Algorithms.OpeningInfo
+                    {
+                        X = op.X,
+                        Y = op.Y,
+                        Width = op.Size > 0 ? op.Size : 0.9,
+                        IsDoor = op.Type == "Door",
+                        RoomName = op.RoomName ?? ""
+                    });
+                }
+
                 Console.WriteLine($"ℹ️ חזיתות/חתכים: {geo.Rooms.Count} חדרים, {geo.Openings.Count} פתחים");
 
                 try
@@ -719,7 +741,7 @@ namespace CadProject.Controllers
                     var sections = secGenerator.GenerateAutoSections(geo);
                     if (sections.ContainsKey("Section_AA")) sections["Section_AA"].Save(Path.Combine(tempFolder, "4_Section_AA.dxf"));
                     if (sections.ContainsKey("Section_BB")) sections["Section_BB"].Save(Path.Combine(tempFolder, "4_Section_BB.dxf"));
-                
+
                 }
                 catch (Exception ex) { Console.WriteLine($"⚠️ שגיאה ביצירת חתך (מדלגים): {ex.Message}"); }
 
@@ -806,10 +828,13 @@ namespace CadProject.Controllers
 
                 // 🌟 קיר חיצוני "צמוד" - עוטף רק את הדירה בפועל (לא את כל שטח המגרש הגדול), 20 ס"מ מכל צד
                 double wallOffset = 0.2;
-                double roomsMinX = layoutResult.PlacedRooms.Min(r => r.PositionX);
-                double roomsMaxX = layoutResult.PlacedRooms.Max(r => r.PositionX + r.Width);
-                double roomsMinY = layoutResult.PlacedRooms.Min(r => r.PositionY);
-                double roomsMaxY = layoutResult.PlacedRooms.Max(r => r.PositionY + r.Length);
+                // המעטפת (הקירות) לא כוללת מרפסות: מרפסת יושבת מחוץ לבניין עם מעקה
+                var envRooms = layoutResult.PlacedRooms.Where(r => r.Name == null || !r.Name.Contains("מרפסת")).ToList();
+                if (envRooms.Count == 0) envRooms = layoutResult.PlacedRooms;
+                double roomsMinX = envRooms.Min(r => r.PositionX);
+                double roomsMaxX = envRooms.Max(r => r.PositionX + r.Width);
+                double roomsMinY = envRooms.Min(r => r.PositionY);
+                double roomsMaxY = envRooms.Max(r => r.PositionY + r.Length);
 
                 List<Point3D> tightOuterWall = new List<Point3D>
                 {
@@ -1301,7 +1326,7 @@ namespace CadProject.Controllers
                     catch (Exception ex) { Console.WriteLine($"⚠️ תיקון פונט נכשל ב-{Path.GetFileName(dxfFile)}: {ex.Message}"); }
                 }
                 ZipFile.CreateFromDirectory(tempFolder, zipFilePath);
-                
+
                 var fileBytes = System.IO.File.ReadAllBytes(zipFilePath);
                 return File(fileBytes, "application/zip", "Full_Architectural_Project.zip");
             }
@@ -1454,7 +1479,7 @@ namespace CadProject.Controllers
             return Ok(result);
         }
 
-       
+
         [HttpPost("generate-sections")]
         [DisableRequestSizeLimit]
         public IActionResult GenerateSections(IFormFile file)

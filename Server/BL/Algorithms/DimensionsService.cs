@@ -59,10 +59,23 @@ namespace BL.Algorithms
                 double x0 = r.X, x1 = r.X + r.W;
                 double y0 = r.Y, y1 = r.Y + r.L;
 
-                WallLine(s, x0, y0, x1, y0, lInt, g.Openings);
-                WallLine(s, x1, y0, x1, y1, lInt, g.Openings);
-                WallLine(s, x1, y1, x0, y1, lInt, g.Openings);
-                WallLine(s, x0, y1, x0, y0, lInt, g.Openings);
+                if (DxfUtil.IsProjectingBalcony(g, r))
+                {
+                    // מרפסת: בלי קירות, רק קו מעקה בשלוש הצלעות החיצוניות
+                    var e = DxfUtil.RailEdges(g, r);
+                    var lRail = DxfUtil.Lay(doc, "A-RAIL", 5);
+                    if (e[0]) s.Ln(x0, y0, x1, y0, lRail);
+                    if (e[1]) s.Ln(x1, y0, x1, y1, lRail);
+                    if (e[2]) s.Ln(x1, y1, x0, y1, lRail);
+                    if (e[3]) s.Ln(x0, y1, x0, y0, lRail);
+                }
+                else
+                {
+                    WallLine(s, x0, y0, x1, y0, lInt, g.Openings);
+                    WallLine(s, x1, y0, x1, y1, lInt, g.Openings);
+                    WallLine(s, x1, y1, x0, y1, lInt, g.Openings);
+                    WallLine(s, x0, y1, x0, y0, lInt, g.Openings);
+                }
                 xs.Add(x0); xs.Add(x1); ys.Add(y0); ys.Add(y1);
 
                 double cw = x1 - x0, cl = y1 - y0, cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
@@ -349,8 +362,20 @@ namespace BL.Algorithms
                 double y1 = r.Y + r.L - (Math.Abs(r.Y + r.L - rMaxY) < TOL ? 0 : HALF);
                 clear[r] = new[] { x0, y0, x1, y1 };
 
-                Ln(x0, y0, x1, y0, lWall); Ln(x1, y0, x1, y1, lWall);
-                Ln(x1, y1, x0, y1, lWall); Ln(x0, y1, x0, y0, lWall);
+                if (DxfUtil.IsProjectingBalcony(g, r))
+                {
+                    var e = DxfUtil.RailEdges(g, r);
+                    var lRail = DxfUtil.Lay(doc, "A-IDIM-RAIL", 5);
+                    if (e[0]) Ln(x0, y0, x1, y0, lRail);
+                    if (e[1]) Ln(x1, y0, x1, y1, lRail);
+                    if (e[2]) Ln(x1, y1, x0, y1, lRail);
+                    if (e[3]) Ln(x0, y1, x0, y0, lRail);
+                }
+                else
+                {
+                    Ln(x0, y0, x1, y0, lWall); Ln(x1, y0, x1, y1, lWall);
+                    Ln(x1, y1, x0, y1, lWall); Ln(x0, y1, x0, y0, lWall);
+                }
 
                 double cw = x1 - x0, ch = y1 - y0;
                 Txt(r.Name ?? "", (x0 + x1) / 2, y0 + ch * 0.72, 0.16, lTxt, TextAlignment.MiddleCenter);

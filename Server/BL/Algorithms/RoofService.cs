@@ -475,6 +475,19 @@ namespace BL.Algorithms
             var inner = RoofInset(P, wallT);
             if (inner == null || inner.Count < 3) return "Error: לא ניתן לחשב פרפט פנימי.";
 
+            // מרפסות מקורות: המשך התקרה מחוץ למעטפת (וגבולות הגיליון בשביל המידות)
+            double minBx = 0, minBy = 0, maxBx = W, maxBy = H;
+            foreach (var b in g.Rooms.Where(r => r.IsCovered && DxfUtil.IsProjectingBalcony(g, r)))
+            {
+                var rc = DxfUtil.BalconyOuterRect(g, b, DxfUtil.BalconyDir(g, b));
+                double bx0 = (rc[0] - ox) * K, by0 = (rc[1] - oy) * K, bx1 = (rc[2] - ox) * K, by1 = (rc[3] - oy) * K;
+                s.Rect(bx0, by0, bx1, by1, lOut);
+                RoofHatch(s, bx0, by0, bx1, by1, 25, lHatch);
+                s.Txt("גג מרפסת מקורה", (bx0 + bx1) / 2, (by0 + by1) / 2, 11, lTxt, TextAlignment.BottomCenter);
+                minBx = Math.Min(minBx, bx0); minBy = Math.Min(minBy, by0);
+                maxBx = Math.Max(maxBx, bx1); maxBy = Math.Max(maxBy, by1);
+            }
+
             // הגג נקי מחדרים: לא מציירים קירות פנימיים ולא שמות חדרים
 
             // ---------- 2. פרפט: קו חיצוני + קו פנימי + קווי פוצ'ה ----------
@@ -612,19 +625,19 @@ namespace BL.Algorithms
             }
 
             // ---------- 5. מידות ----------
-            s.DimH(0, W, -90, ((int)Math.Round(W)).ToString(), lDim, lTxt, 14);
-            s.DimV(-90, 0, H, ((int)Math.Round(H)).ToString(), lDim, lTxt, 14);
-            s.DimH(ix0, ix1, H + 70, ((int)Math.Round(ix1 - ix0)).ToString(), lDim, lTxt, 12);
+            s.DimH(0, W, minBy - 90, ((int)Math.Round(W)).ToString(), lDim, lTxt, 14);
+            s.DimV(minBx - 90, 0, H, ((int)Math.Round(H)).ToString(), lDim, lTxt, 14);
+            s.DimH(ix0, ix1, maxBy + 70, ((int)Math.Round(ix1 - ix0)).ToString(), lDim, lTxt, 12);
             s.Txt("עובי פרפט " + (int)wallT, W + 30, H / 2, 11, lTxt);
             s.Ln(W + 25, H / 2 - 4, W - 2, Math.Min(H / 2, H / 2) + 0, lDim);
 
             // ---------- 6. כותרת, חץ צפון, מקרא והערות ----------
-            double ty = H + 220;
+            double ty = maxBy + 220;
             s.Txt("תוכנית גגות 1:100", W / 2, ty, 35, lTxt, TextAlignment.BottomCenter);
             s.Txt("מידות בס\"מ, מפלסים במטרים", W / 2, ty - 40, 14, lTxt, TextAlignment.BottomCenter);
 
             // חץ צפון
-            double nx = W + 160, ny = H + 80;
+            double nx = maxBx + 160, ny = maxBy + 80;
             RoofCircle(s, nx, ny, 35, lOut);
             s.Ln(nx, ny - 35, nx, ny + 35, lOut);
             s.Ln(nx, ny + 35, nx - 12, ny + 8, lOut);
@@ -632,7 +645,7 @@ namespace BL.Algorithms
             s.Txt("N", nx, ny + 45, 18, lTxt, TextAlignment.BottomCenter);
 
             // מקרא ומפלסים
-            double lx = 0, ly = -230;
+            double lx = 0, ly = minBy - 230;
             s.Txt("מקרא והערות:", lx, ly, 14, lTxt);
             string[] notes =
             {

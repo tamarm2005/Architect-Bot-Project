@@ -9,6 +9,7 @@ using netDxf.Tables;
 
 namespace BL.Algorithms
 {
+    // חזיתות  
     // ===================== מודל נתונים משותף (הכול במטרים, כמו תוכנית הריהוט) =====================
     public class OpeningInfo
     {
@@ -30,6 +31,9 @@ namespace BL.Algorithms
         public string Name = "";
         public double X, Y, W, L;
         public List<FurnInfo> Furniture = new List<FurnInfo>();
+
+        public bool IsBalcony { get { return (Name ?? "").Contains("מרפסת"); } }
+        public bool IsCovered { get { return IsBalcony && (Name ?? "").Contains("מקורה"); } }
     }
 
     public class BuildingGeometry
@@ -55,6 +59,49 @@ namespace BL.Algorithms
     internal static class DxfUtil
     {
         public const double K = 100.0;  // מטר -> ס"מ
+        public const double BalStep = 15; // ירידת רצפת המרפסת מתחת לרצפת הדירה (ס"מ)
+
+        // לאיזה צד של הבניין המרפסת צמודה (S/N/E/W)
+        public static char BalconyDir(BuildingGeometry g, RoomInfo b)
+        {
+            double cx = b.X + b.W / 2, cy = b.Y + b.L / 2;
+            char best = 'S'; double bd = double.MaxValue;
+            foreach (char d in new[] { 'S', 'N', 'E', 'W' })
+            {
+                double v = Depth(d, cx, cy, g);
+                if (v < bd) { bd = v; best = d; }
+            }
+            return best;
+        }
+
+        // החלק של המרפסת שנמצא מחוץ למעטפת: x0,y0,x1,y1 במטרים
+        public static double[] BalconyOuterRect(BuildingGeometry g, RoomInfo b, char d)
+        {
+            double x0 = b.X, x1 = b.X + b.W, y0 = b.Y, y1 = b.Y + b.L;
+            switch (d)
+            {
+                case 'S': y1 = Math.Min(y1, g.MinY); break;
+                case 'N': y0 = Math.Max(y0, g.MaxY); break;
+                case 'E': x0 = Math.Max(x0, g.MaxX); break;
+                default: x1 = Math.Min(x1, g.MinX); break;
+            }
+            return new[] { x0, y0, x1, y1 };
+        }
+
+        // מרפסת שבאמת בולטת מחוץ לבניין (ולא חדר שנדחס פנימה)
+        public static bool IsProjectingBalcony(BuildingGeometry g, RoomInfo r)
+        {
+            if (!r.IsBalcony) return false;
+            var rc = BalconyOuterRect(g, r, BalconyDir(g, r));
+            return rc[2] - rc[0] > 0.05 && rc[3] - rc[1] > 0.05;
+        }
+
+        // אילו צלעות של המרפסת מקבלות מעקה: תחתון, ימני, עליון, שמאלי (false = הצד הצמוד לבניין)
+        public static bool[] RailEdges(BuildingGeometry g, RoomInfo r)
+        {
+            char d = BalconyDir(g, r);
+            return new[] { d != 'N', d != 'W', d != 'S', d != 'E' };
+        }
 
         public static Layer Lay(DxfDocument doc, string name, short aci, Lineweight lw = Lineweight.Default)
         {
@@ -393,6 +440,7 @@ namespace BL.Algorithms
             var lWin = DxfUtil.Lay(doc, "A-ELEV-WIND", 4);
             var lDoor = DxfUtil.Lay(doc, "A-ELEV-DOOR", 1);
             var lDim = DxfUtil.Lay(doc, "A-ELEV-DIM", 2);
+            var lRail = DxfUtil.Lay(doc, "A-ELEV-RAIL", 5);
             var lTxt = DxfUtil.Lay(doc, "A-TEXT", 7);
 
             // 1. קירות החזית (הקרובים עבים, הרחוקים דקים - לבניין שאינו מלבן)
@@ -430,8 +478,24 @@ namespace BL.Algorithms
                 cuts.Add(u - w / 2); cuts.Add(u + w / 2);
             }
 
+            // 3ב. מרפסות: רצפה, מעקה עם סורגים, ובמרפסת מקורה גם תקרה ועמודים
+            double padL = 0;
+            foreach (var b in g.Rooms.Where(r => DxfUtil.IsProjectingBalcony(g, r)))
+            {
+                char bd = DxfUtil.BalconyDir(g, b);
+                bool facing = bd == dir;
+                bool sideView = (bd == 'S' || bd == 'N') != (dir == 'S' || dir == 'N');
+                if (!facing && !sideView) continue;     // המרפסת מאחורי הבניין
+                var rc = DxfUtil.BalconyOuterRect(g, b, bd);
+                double ua = DxfUtil.U(dir, rc[0], rc[1], g) * K, ub = DxfUtil.U(dir, rc[2], rc[3], g) * K;
+                if (ua > ub) { var tmp = ua; ua = ub; ub = tmp; }
+                if (ua < 0) padL = Math.Max(padL, -ua);
+                DrawBalcony(s, ua, ub, fl, b.IsCovered, lWall, lRail);
+            }
+
             // 4. מפלסים
-            double xl = -140;
+            double xl = -140 - padL;
+
             s.LevelMark(xl, 0, DxfUtil.Lvl(-fl / K), lDim, lTxt);
             s.LevelMark(xl, fl, DxfUtil.Lvl(0), lDim, lTxt);
             s.LevelMark(xl, wallTop, DxfUtil.Lvl((wallTop - fl) / K), lDim, lTxt);
@@ -444,6 +508,25 @@ namespace BL.Algorithms
                     s.DimH(cuts[i], cuts[i + 1], -70, ((int)Math.Round(cuts[i + 1] - cuts[i])).ToString(), lDim, lTxt);
             s.DimH(0, W, -120, (W / K).ToString("0.00", CultureInfo.InvariantCulture), lDim, lTxt, 12);
             s.Txt(title + "   1:100", W / 2, -190, 28, lTxt, TextAlignment.BottomCenter);
+        }
+
+        private void DrawBalcony(Sheet s, double ua, double ub, double fl, bool covered, Layer lWall, Layer lRail)
+        {
+            double top = fl - DxfUtil.BalStep;          // פני רצפת המרפסת
+            double rt = top + 100;                      // ראש המעקה
+            s.Rect(ua, top - 20, ub, top, lWall);       // שפת הרצפה
+            s.Rect(ua, rt - 4, ub, rt, lRail);          // פס עליון
+            s.Ln(ua, top + 8, ub, top + 8, lRail);      // פס תחתון
+            s.Ln(ua, top, ua, rt, lRail);
+            s.Ln(ub, top, ub, rt, lRail);
+            for (double x = ua + 12; x < ub - 1; x += 12) s.Ln(x, top + 8, x, rt - 4, lRail);   // סורגים כל 12 ס"מ
+            if (covered)
+            {
+                double ceil = fl + ClearH;
+                s.Rect(ua, ceil, ub, ceil + SlabT, lWall);   // תקרת המרפסת
+                s.Rect(ua, top, ua + 20, ceil, lWall);       // עמודים 20x20
+                s.Rect(ub - 20, top, ub, ceil, lWall);
+            }
         }
 
         private void DrawWindow(Sheet s, double u, double w, double fl, double sill, Layer l)

@@ -6,6 +6,7 @@ using netDxf;
 using netDxf.Entities;
 using netDxf.Tables;
 
+//חתכים
 namespace BL.Algorithms
 {
     public class SectionGenerator
@@ -65,11 +66,13 @@ namespace BL.Algorithms
             }
             var crossed = g.Rooms.Where(r => h ? (r.Y < c && c < r.Y + r.L) : (r.X < c && c < r.X + r.W)).ToList();
             if (crossed.Count == 0) return -1e9;
+            if (crossed.All(r => DxfUtil.IsProjectingBalcony(g, r))) return -1e9;   // חתך שעובר רק במרפסת לא מעניין
 
             double s = crossed.Count;
             if (crossed.Any(r => DxfUtil.IsLiving(r.Name))) s += 4;
             if (crossed.Any(r => DxfUtil.IsWet(r.Name))) s += 3;
             if (crossed.Any(r => DxfUtil.IsBedroom(r.Name))) s += 1.5;
+            if (crossed.Any(r => DxfUtil.IsProjectingBalcony(g, r))) s += 3;   // עדיפות לחתך שרואים בו את המרפסת
 
             double open = 0;
             foreach (var o in g.Openings)
@@ -119,6 +122,17 @@ namespace BL.Algorithms
 
             var crossed = g.Rooms.Where(r => h ? (r.Y < c && c < r.Y + r.L) : (r.X < c && c < r.X + r.W))
                                  .OrderBy(r => A0(r)).ToList();
+
+            // מרפסות בולטות מטופלות בנפרד (בלי קירות), ושאר החדרים מחושבים כרגיל
+            var proj = crossed.Where(r => DxfUtil.IsProjectingBalcony(g, r)).ToList();
+            crossed = crossed.Where(r => !proj.Contains(r)).ToList();
+            double leftExt = 0, rightExt = 0;
+            foreach (var pb in proj)
+            {
+                double qa = T(A0(pb)), qb = T(A1(pb));
+                if (Math.Max(qa, qb) > Ltot) rightExt = Math.Max(rightExt, Math.Max(qa, qb) - Ltot);
+                else if (Math.Min(qa, qb) < 0) leftExt = Math.Max(leftExt, -Math.Min(qa, qb));
+            }
 
             // 1. קירות נחתכים: מאחדים קצוות חדרים סמוכים לקיר אחד
             var raw = new List<double>();
@@ -189,11 +203,37 @@ namespace BL.Algorithms
             var ext = walls.Where(w => w.Ext).ToList();
             if (ext.Count >= 2) s.Ln(ext.First().B, slabTop + 4, ext.Last().A, slabTop + 4, lBeyond);   // גימור גג
 
-            // 4. קרקע משני הצדדים
-            s.Ln(-250, -FloorAbove, 0, -FloorAbove, lGround);
-            s.Ln(Ltot, -FloorAbove, Ltot + 250, -FloorAbove, lGround);
-            s.Poche(-250, -60, 0, -FloorAbove, 25, lGround);
-            s.Poche(Ltot, -60, Ltot + 250, -FloorAbove, 25, lGround);
+            // 3ב. מרפסות: רצפה, מעקה, ובמקורה גם תקרה ועמוד
+            foreach (var pb in proj)
+            {
+                double qa = T(A0(pb)), qb = T(A1(pb));
+                bool right = Math.Max(qa, qb) > Ltot;
+                double outer = right ? Math.Max(qa, qb) : Math.Min(qa, qb);
+                double inner = right ? Ltot : 0;
+                double x0b = Math.Min(inner, outer), x1b = Math.Max(inner, outer);
+                double top0 = -DxfUtil.BalStep;
+
+                s.Rect(x0b, top0 - 20, x1b, top0, lCut);                 // רצפת המרפסת
+                s.Poche(x0b, top0 - 20, x1b, top0, 20, lHatch);
+                s.Ln(outer, top0, outer, top0 + 100, lCut);              // מעקה 100 ס"מ
+                s.Rect(outer - 2, top0 + 97, outer + 2, top0 + 100, lCut);
+                if (pb.IsCovered)
+                {
+                    s.Rect(x0b, ClearH, x1b, slabTop, lCut);             // תקרת המרפסת
+                    s.Poche(x0b, ClearH, x1b, slabTop, 20, lHatch);
+                    double cx0 = right ? outer - 20 : outer;
+                    s.Rect(cx0, top0, cx0 + 20, ClearH, lBeyond);        // עמוד 20x20 (נראה מאחורי החתך)
+                }
+                s.Txt(pb.Name, (x0b + x1b) / 2, 20, 10, lTxt, TextAlignment.BottomCenter);
+                s.DimH(x0b, x1b, -120, ((int)Math.Round(x1b - x0b)).ToString(), lDim, lTxt);
+            }
+
+            // 4. קרקע משני הצדדים (מתחילה אחרי המרפסת)
+            s.Ln(-250 - leftExt, -FloorAbove, -leftExt, -FloorAbove, lGround);
+            s.Ln(Ltot + rightExt, -FloorAbove, Ltot + rightExt + 250, -FloorAbove, lGround);
+            s.Poche(-250 - leftExt, -60, -leftExt, -FloorAbove, 25, lGround);
+            s.Poche(Ltot + rightExt, -60, Ltot + rightExt + 250, -FloorAbove, 25, lGround);
+
 
             // 5. ריהוט: חתוך (אדום) ומה שנראה מאחור (דק)
             foreach (var r in crossed)

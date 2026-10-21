@@ -9,7 +9,7 @@ namespace CadApplication.Algorithms
         public string Name { get; set; }
         public double Width { get; set; }
         public double Length { get; set; }
-        public double Area { get; set; } // 🌟 עכשיו שדה רגיל (לא מחושב) - כדי שאפשר יהיה לבקש רק שטח, בלי רוחב/אורך
+        public double Area { get; set; } //  עכשיו שדה רגיל (לא מחושב) - כדי שאפשר יהיה לבקש רק שטח, בלי רוחב/אורך
 
         public double PositionX { get; set; }
         public double PositionY { get; set; }
