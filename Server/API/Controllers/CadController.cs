@@ -616,7 +616,7 @@ namespace CadProject.Controllers
                     doc.Entities.Add(new netDxf.Entities.Polyline2D(new List<netDxf.Vector2> { rp1, rp2, rp3, rp4, rp1 }) { Layer = roomLayer });
 
                     // 🌟 תווית שם החדר
-                    doc.Entities.Add(new netDxf.Entities.Text($"{room.Name}", new netDxf.Vector2(room.PositionX + 0.1, room.PositionY + room.Length - 0.3), 0.25) { Layer = textLayer });
+                    doc.Entities.Add(new netDxf.Entities.Text($"{room.Name}", new netDxf.Vector2(room.PositionX + 0.1, room.PositionY + room.Length - 0.3), 0.18) { Layer = textLayer });
 
                     foreach (var f in room.Furniture ?? new List<ConfirmedFurnitureDto>())
                     {
@@ -655,7 +655,12 @@ namespace CadProject.Controllers
                         else { DrawFallbackRectangle(doc, startX, startY, f.Width, f.Length, furnitureLayer); }
 
                         //  תווית שם הרהיט
-                        doc.Entities.Add(new netDxf.Entities.Text(f.Name ?? "", new netDxf.Vector2(startX, startY - 0.1), 0.12) { Layer = textLayer });
+                        double lw = f.Width, ll = f.Length;
+                        double rotL = Math.Abs(f.Rotation % 180);
+                        if (rotL > 45 && rotL < 135) { double tt = lw; lw = ll; ll = tt; }   // רהיט מסובב: מחליפים רוחב ואורך
+                        string fname = f.Name ?? "";
+                        double th = Math.Max(0.05, Math.Min(0.12, lw / Math.Max(1, fname.Length) / 0.7));   // גודל לפי רוחב הרהיט
+                        doc.Entities.Add(new netDxf.Entities.Text(fname, new netDxf.Vector2(startX + lw / 2, startY + ll / 2), th) { Layer = textLayer, Alignment = netDxf.Entities.TextAlignment.MiddleCenter });
                     }
                 }
 
