@@ -1,10 +1,12 @@
 import React, { useContext, useEffect, useState, useRef } from 'react';
 import { PlotContext } from './PlotContext';
+import Plan3D from './Plan3D';
 
 const FurniturePlan = ({ layoutData, onBack }) => {
     const { rooms, totalAreaM2, coveragePercent } = layoutData;
     const { programData } = useContext(PlotContext);
     const containerRef = useRef(null);
+    const [show3D, setShow3D] = useState(false);
     const [layout, setLayout] = useState({ scale: 20, offsetX: 0, offsetY: 0 });
 
     const [view, setView] = useState({ zoom: 1, panX: 0, panY: 0 });
@@ -129,6 +131,7 @@ const FurniturePlan = ({ layoutData, onBack }) => {
 
     return (
         <div style={{ padding: '20px', fontFamily: 'Segoe UI, sans-serif', direction: 'rtl', height: '100%', boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
+            {show3D && <Plan3D layoutData={layoutData} onClose={() => setShow3D(false)} />}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', background: '#ffffff', padding: '15px', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
                 <div>
                     <h2 style={{ margin: 0, color: '#1e293b' }}>🛋️ תוכנית העמדת ריהוט אופטימלית</h2>
@@ -137,11 +140,13 @@ const FurniturePlan = ({ layoutData, onBack }) => {
                     </p>
                 </div>
 
-                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                    <div style={{ fontSize: '12px', color: '#64748b', textAlign: 'left', lineHeight: '1.2' }}>
-                        <div>✔️ ת. ריהוט | ✔️ ת. מידות</div>
-                        <div>✔️ חתכים | ✔️ חזיתות | ✔️ גגות</div>
-                    </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'auto auto', gap: '8px', alignItems: 'stretch' }}>
+                    <button
+                        onClick={() => setShow3D(true)}
+                        style={{ background: '#0f172a', border: 'none', padding: '10px 18px', borderRadius: '8px', cursor: 'pointer', fontWeight: '700', color: '#ffffff' }}
+                    >
+                        🏠 תצוגת תלת-ממד
+                    </button>
 
                     <button
                         onClick={handleDownloadFullProject}
@@ -152,7 +157,7 @@ const FurniturePlan = ({ layoutData, onBack }) => {
 
                     <button
                         onClick={onBack}
-                        style={{ background: '#f1f5f9', border: '1px solid #cbd5e1', padding: '10px 16px', borderRadius: '8px', cursor: 'pointer', fontWeight: '600', color: '#475569' }}
+                        style={{ background: '#f1f5f9', border: '1px solid #cbd5e1', padding: '10px 16px', borderRadius: '8px', cursor: 'pointer', fontWeight: '600', color: '#475569', gridColumn: '1 / -1' }}
                     >
                         חזור לעריכת הבועות
                     </button>
@@ -407,7 +412,7 @@ const FurniturePlan = ({ layoutData, onBack }) => {
                         const railIn = Math.max(2.5, 0.05 * scale);
                         const isCovered = isBalcony && (room.name || '').includes('מקורה');
                         const colSize = Math.max(3, 0.2 * scale);
-                        
+
                         return (
                             <div key={roomIdx} style={{ position: 'absolute', left: `${roomLeft}px`, top: `${roomTop}px`, width: `${roomW}px`, height: `${roomH}px` }}>
                                 <div style={{ position: 'absolute', inset: 0, background: isCovered ? 'repeating-linear-gradient(45deg, #ffffff, #ffffff 6px, #e2e8f0 6px, #e2e8f0 7px)' : isCorridor ? 'rgba(148,163,184,0.08)' : '#ffffff', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }} />
